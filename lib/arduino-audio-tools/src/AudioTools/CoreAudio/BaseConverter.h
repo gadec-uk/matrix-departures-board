@@ -1,0 +1,2062 @@
+#pragma once
+#include "AudioFilter/Filter.h"
+#include "AudioTools/CoreAudio/AudioBasic/Collections.h"
+#include "AudioTypes.h"
+
+/**
+ * @defgroup convert Converters
+ * @ingroup tools
+ * @brief Convert Audio
+ * You can add a converter as argument to the StreamCopy::copy() or better use
+ * is with a ConverterStream.
+ */
+
+namespace audio_tools {
+
+/**
+ * @brief Abstract Base class for Converters
+ * A converter is processing the data in the indicated array
+ * @ingroup convert
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ * @tparam T
+ */
+class BaseConverter {
+ public:
+  BaseConverter() = default;
+  BaseConverter(BaseConverter const &) = delete;
+  virtual ~BaseConverter() = default;
+
+  BaseConverter &operator=(BaseConverter const &) = delete;
+
+  virtual size_t convert(uint8_t *src, size_t size) = 0;
+};
+
+/**
+ * @brief Dummy converter which does nothing
+ * @ingroup convert
+ * @tparam T
+ */
+class NOPConverter : public BaseConverter {
+ public:
+  size_t convert(uint8_t(*src), size_t size) override { return size; };
+};
+
+/**
+ * @brief Multiplies the values with the indicated factor adds the offset and
+ * clips at maxValue. To mute use a factor of 0.0!
+ * @ingroup convert
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ *
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ConverterScaler : public BaseConverter {
+ public:
+  ConverterScaler(float factor, T offset, T maxValue, int channels = 2) {
+    this->factor_value = factor;
+    this->maxValue = maxValue;
+    this->offset_value = offset;
+    this->channels = channels;
+  }
+
+  size_t convert(uint8_t *src, size_t byte_count) {
+    T *sample = (T *)src;
+    int size = byte_count / channels / sizeof(T);
+    for (size_t j = 0; j < size; j++) {
+      for (int i = 0; i < channels; i++) {
+        *sample = (*sample + offset_value) * factor_value;
+        if (*sample > maxValue) {
+          *sample = maxValue;
+        } else if (*sample < -maxValue) {
+          *sample = -maxValue;
+        }
+        sample++;
+      }
+    }
+    return byte_count;
+  }
+
+  /// Defines the factor (volume)
+  void setFactor(float factor) { this->factor_value = factor; }
+
+  /// Defines the offset
+  void setOffset(T offset) { this->offset_value = offset; }
+
+  /// Determines the actual factor (volume)
+  float factor() { return factor_value; }
+
+  /// Determines the offset value
+  T offset() { return offset_value; }
+
+ protected:
+  int channels;
+  float factor_value;
+  T maxValue;
+  T offset_value;
+};
+
+/**
+ * @brief Makes sure that the avg of the signal is set to 0
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ConverterAutoCenterT : public BaseConverter {
+ public:
+  ConverterAutoCenterT(int channels = 2, bool isDynamic = false) {
+    this->channels = channels;
+    this->is_dynamic = isDynamic;
+  }
+
+  void clear() { resetState(); }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t(*src), size_t byte_count) override {
+    size_t size = byte_count / channels / sizeof(T);
+    T *sample = (T *)src;
+    setup((T *)src, size);
+    // convert data
+    if (is_setup) {
+      if (!is_dynamic) {
+        for (size_t j = 0; j < size; j++) {
+          for (int ch = 0; ch < channels; ch++) {
+            sample[(j * channels) + ch] =
+                sample[(j * channels) + ch] - offset_to[ch];
+          }
+        }
+      } else {
+        for (size_t j = 0; j < size; j++) {
+          for (int ch = 0; ch < channels; ch++) {
+            sample[(j * channels) + ch] = sample[(j * channels) + ch] -
+                                          offset_from[ch] +
+                                          (offset_step[ch] * size);
+          }
+        }
+      }
+    }
+    return byte_count;
+  }
+
+ protected:
+  Vector<float> offset_from{0};
+  Vector<float> offset_to{0};
+  Vector<float> offset_step{0};
+  Vector<float> total{0};
+  float left = 0.0;
+  float right = 0.0;
+  bool is_setup = false;
+  bool is_dynamic;
+  int channels;
+
+  void resetState() {
+    offset_from.clear();
+    offset_to.clear();
+    offset_step.clear();
+    total.clear();
+    left = 0.0;
+    right = 0.0;
+    is_setup = false;
+  }
+
+  void setup(T *src, size_t size) {
+    if (size == 0) return;
+    if (!is_setup || is_dynamic) {
+      if (offset_from.size() == 0) {
+        offset_from.resize(channels);
+        offset_to.resize(channels);
+        offset_step.resize(channels);
+        total.resize(channels);
+      }
+
+      // save last offset
+      for (int ch = 0; ch < channels; ch++) {
+        offset_from[ch] = offset_to[ch];
+        total[ch] = 0.0;
+      }
+
+      // calculate new offset
+      for (size_t j = 0; j < size; j++) {
+        for (int ch = 0; ch < channels; ch++) {
+          total[ch] += src[(j * channels) + ch];
+        }
+      }
+      for (int ch = 0; ch < channels; ch++) {
+        offset_to[ch] = total[ch] / size;
+        offset_step[ch] = (offset_to[ch] - offset_from[ch]) / size;
+      }
+      is_setup = true;
+    }
+  }
+};
+
+/**
+ * @brief Makes sure that the avg of the signal is set to 0
+ * @ingroup convert
+ */
+class ConverterAutoCenter : public BaseConverter {
+ public:
+  ConverterAutoCenter() = default;
+
+  ConverterAutoCenter(AudioInfo info) {
+    begin(info.channels, info.bits_per_sample);
+  }
+
+  ConverterAutoCenter(int channels, int bitsPerSample) {
+    begin(channels, bitsPerSample);
+  }
+  ~ConverterAutoCenter() { end(); }
+
+  void end() {
+    if (p_converter != nullptr) {
+      delete p_converter;
+      p_converter = nullptr;
+    }
+  }
+
+  bool begin(AudioInfo info, bool isDynamic = false) {
+    return begin(info.channels, info.bits_per_sample, isDynamic);
+  }
+
+  bool begin(int channels, int bitsPerSample, bool isDynamic = false) {
+    // check if we need to create a new converter
+    if (p_converter != nullptr && channels == this->channels &&
+        bitsPerSample == this->bits_per_sample && isDynamic == this->is_dynamic) {
+      return true;
+    }
+    this->channels = channels;
+    this->bits_per_sample = bitsPerSample;
+    this->is_dynamic = isDynamic;
+    end();
+    assert(p_converter == nullptr);
+    switch (bits_per_sample) {
+      case 8: {
+        p_converter = new ConverterAutoCenterT<int8_t>(channels, isDynamic);
+        break;
+      }
+      case 16: {
+        p_converter = new ConverterAutoCenterT<int16_t>(channels, isDynamic);
+        break;
+      }
+      case 24: {
+        p_converter = new ConverterAutoCenterT<int24_t>(channels, isDynamic);
+        break;
+      }
+      case 32: {
+        p_converter = new ConverterAutoCenterT<int32_t>(channels, isDynamic);
+        break;
+      }
+    }
+    return p_converter != nullptr;
+  }
+
+  size_t convert(uint8_t *src, size_t size) override {
+    if (p_converter == nullptr) return 0;
+    return p_converter->convert(src, size);
+  }
+
+  void clear() {
+    end();
+    if (channels > 0 && bits_per_sample > 0) {
+      begin(channels, bits_per_sample, is_dynamic);
+    }
+  }
+  void reset() { clear(); }
+
+ protected:
+  int channels = 0;
+  int bits_per_sample = 0;
+  bool is_dynamic = false;
+  BaseConverter *p_converter = nullptr;
+};
+
+/**
+ * @brief Switches the left and right channel
+ * @ingroup convert
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ *
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ConverterSwitchLeftAndRight : public BaseConverter {
+ public:
+  ConverterSwitchLeftAndRight(int channels = 2) { this->channels = channels; }
+
+  size_t convert(uint8_t *src, size_t byte_count) override {
+    if (channels == 2) {
+      int size = byte_count / channels / sizeof(T);
+      T *sample = (T *)src;
+      for (size_t j = 0; j < size; j++) {
+        T temp = *sample;
+        *sample = *(sample + 1);
+        *(sample + 1) = temp;
+        sample += 2;
+      }
+    }
+    return byte_count;
+  }
+
+ protected:
+  int channels = 2;
+};
+
+/**
+ * @brief Configure ConverterFillLeftAndRight
+ * @ingroup convert
+ */
+enum FillLeftAndRightStatus { Auto, LeftIsEmpty, RightIsEmpty };
+
+/**
+ * @brief Make sure that both channels contain any data. We copy
+ * the data from the non-empty channel to the empty one.
+ * @ingroup convert
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ *
+ * @tparam T
+ */
+
+template <typename T = int16_t>
+class ConverterFillLeftAndRight : public BaseConverter {
+ public:
+  ConverterFillLeftAndRight(FillLeftAndRightStatus config = Auto,
+                            int channels = 2) {
+    this->channels = channels;
+    switch (config) {
+      case LeftIsEmpty:
+        left_empty = true;
+        right_empty = false;
+        is_setup = true;
+        break;
+      case RightIsEmpty:
+        left_empty = false;
+        right_empty = true;
+        is_setup = true;
+        break;
+      case Auto:
+        is_setup = false;
+        break;
+    }
+  }
+
+  size_t convert(uint8_t *src, size_t byte_count) {
+    if (channels == 2) {
+      int size = byte_count / channels / sizeof(T);
+      setup((T *)src, size);
+      if (left_empty && !right_empty) {
+        T *sample = (T *)src;
+        for (size_t j = 0; j < size; j++) {
+          *sample = *(sample + 1);
+          sample += 2;
+        }
+      } else if (!left_empty && right_empty) {
+        T *sample = (T *)src;
+        for (size_t j = 0; j < size; j++) {
+          *(sample + 1) = *sample;
+          sample += 2;
+        }
+      }
+    }
+    return byte_count;
+  }
+
+ private:
+  bool is_setup = false;
+  bool left_empty = true;
+  bool right_empty = true;
+  int channels;
+
+  void setup(T *src, size_t size) {
+    if (!is_setup) {
+      for (int j = 0; j < size; j++) {
+        if (*src != 0) {
+          left_empty = false;
+          break;
+        }
+        src += 2;
+      }
+      for (int j = 0; j < size - 1; j++) {
+        if (*(src) != 0) {
+          right_empty = false;
+          break;
+        }
+        src += 2;
+      }
+      // stop setup as soon as we found some data
+      if (!right_empty || !left_empty) {
+        is_setup = true;
+      }
+    }
+  }
+};
+
+/**
+ * @brief special case for internal DAC output for the ESP32. The incomming PCM
+ * buffer needs to be converted from signed 16bit to unsigned
+ * @ingroup convert
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ *
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ConverterToInternalDACFormat : public BaseConverter {
+ public:
+  ConverterToInternalDACFormat(int channels = 2) { this->channels = channels; }
+
+  size_t convert(uint8_t *src, size_t byte_count) override {
+    int size = byte_count / channels / sizeof(T);
+    T *sample = (T *)src;
+    for (int i = 0; i < size; i++) {
+      for (int j = 0; j < channels; j++) {
+        *sample = *sample + 0x8000;
+        sample++;
+      }
+    }
+    return byte_count;
+  }
+
+ protected:
+  int channels;
+};
+
+/**
+ * @brief We combine a datastream which consists of multiple channels into less
+ * channels. E.g. 2 to 1 The last target channel will contain the combined
+ * values of the exceeding source channels.
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ChannelReducerT : public BaseConverter {
+ public:
+  ChannelReducerT() = default;
+
+  ChannelReducerT(int channelCountOfTarget, int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+    to_channels = channelCountOfTarget;
+  }
+
+  void setSourceChannels(int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+  }
+
+  void setTargetChannels(int channelCountOfTarget) {
+    to_channels = channelCountOfTarget;
+  }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    LOGD("convert %d -> %d", from_channels, to_channels);
+    assert(to_channels <= from_channels);
+    int frame_count = size / (sizeof(T) * from_channels);
+    size_t result_size = 0;
+    T *result = (T *)target;
+    T *source = (T *)src;
+    int reduceDiv = from_channels - to_channels + 1;
+
+    for (int i = 0; i < frame_count; i++) {
+      // copy first to_channels-1
+      for (int j = 0; j < to_channels - 1; j++) {
+        *result++ = *source++;
+        result_size += sizeof(T);
+      }
+      // commbined last channels
+      T total = (int16_t)0;
+      for (int j = to_channels - 1; j < from_channels; j++) {
+        total += *source++ / reduceDiv;
+      }
+      *result++ = total;
+      result_size += sizeof(T);
+    }
+    return result_size;
+  }
+
+ protected:
+  int from_channels;
+  int to_channels;
+};
+
+/**
+ * @brief We combine a datastream which consists of multiple channels into less
+ * channels. E.g. 2 to 1 The last target channel will contain the combined
+ * values of the exceeding source channels.
+ * @ingroup convert
+ */
+class ChannelReducer : public BaseConverter {
+ public:
+  ChannelReducer(int channelCountOfTarget, int channelCountOfSource,
+                 int bitsPerSample) {
+    from_channels = channelCountOfSource;
+    to_channels = channelCountOfTarget;
+    bits = bitsPerSample;
+  }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    switch (bits) {
+      case 8: {
+        ChannelReducerT<int8_t> cr8(to_channels, from_channels);
+        return cr8.convert(target, src, size);
+      }
+      case 16: {
+        ChannelReducerT<int16_t> cr16(to_channels, from_channels);
+        return cr16.convert(target, src, size);
+      }
+      case 24: {
+        ChannelReducerT<int24_t> cr24(to_channels, from_channels);
+        return cr24.convert(target, src, size);
+      }
+      case 32: {
+        ChannelReducerT<int32_t> cr32(to_channels, from_channels);
+        return cr32.convert(target, src, size);
+      }
+    }
+    return 0;
+  }
+
+ protected:
+  int from_channels;
+  int to_channels;
+  int bits;
+};
+
+/**
+ * @brief Provides reduced sampling rates
+ * @ingroup convert
+ */
+template <typename T = int16_t>
+class DecimateT : public BaseConverter {
+ public:
+  DecimateT(int factor, int channels) {
+    setChannels(channels);
+    setFactor(factor);
+    count = 0;  // Initialize count to 0
+  }
+
+  /// Defines the number of channels
+  void setChannels(int channels) {
+    this->channels = channels;
+    resetState();
+  }
+
+  /// Sets the factor: e.g. with 4 we keep every fourth sample
+  void setFactor(int factor) {
+    this->factor = factor;
+    resetState();
+  }
+  void clear() { resetState(); }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+    if (size % (sizeof(T) * channels) > 0) {
+      LOGE("Buffer size %d is not a multiple of the number of channels %d",
+           (int)size, channels);
+      return 0;
+    }
+
+    int frame_count = size / (sizeof(T) * channels);
+    T *p_target = (T *)target;
+    T *p_source = (T *)src;
+    size_t result_size = 0;
+
+    for (int i = 0; i < frame_count; i++) {
+      if (++count == factor) {
+        count = 0;
+        // Only keep every "factor" samples
+        for (int ch = 0; ch < channels; ch++) {
+          *p_target++ = p_source[i * channels + ch];  // Corrected indexing
+          result_size += sizeof(T);
+        }
+      }
+    }
+
+    LOGD("decimate %d: %d -> %d bytes", factor, (int)size, (int)result_size);
+    return result_size;
+  }
+
+  operator bool() { return factor > 1; }
+
+ protected:
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (factor <= 0) {
+      LOGE("Decimation factor must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resetState() { count = 0; }
+
+  int channels = 2;
+  int factor = 1;
+  uint16_t count = 0;
+};
+
+/**
+ * @brief Provides a reduced sampling rate by taking a sample at every factor
+ * location (ingoring factor-1 samples)
+ * @ingroup convert
+ */
+
+class Decimate : public BaseConverter {
+ public:
+  Decimate() = default;
+  Decimate(int factor, int channels, int bits_per_sample) {
+    setFactor(factor);
+    setChannels(channels);
+    setBits(bits_per_sample);
+  }
+  /// Defines the number of channels
+  void setChannels(int channels) {
+    this->channels = channels;
+    resetState();
+  }
+  void setBits(int bits) {
+    this->bits = bits;
+    resetState();
+  }
+  /// Sets the factor: e.g. with 4 we keep every forth sample
+  void setFactor(int factor) {
+    this->factor = factor;
+    resetState();
+  }
+  ~Decimate() override { delete state; }
+  void clear() {
+    if (state != nullptr) {
+      state->reset();
+    }
+  }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+    if (state == nullptr) {
+      switch (bits) {
+        case 8:
+          state = new DecimateStateT<int8_t>(factor, channels);
+          break;
+        case 16:
+          state = new DecimateStateT<int16_t>(factor, channels);
+          break;
+        case 24:
+          state = new DecimateStateT<int24_t>(factor, channels);
+          break;
+        case 32:
+          state = new DecimateStateT<int32_t>(factor, channels);
+          break;
+        default:
+          LOGE("Number of bits %d not supported.", bits);
+          return 0;
+      }
+    }
+    return state->convert(target, src, size);
+  }
+
+  operator bool() { return factor > 1; };
+
+ protected:
+  struct DecimateState {
+    virtual ~DecimateState() = default;
+    virtual size_t convert(uint8_t *target, uint8_t *src, size_t size) = 0;
+    virtual void reset() = 0;
+  };
+
+  template <typename T>
+  struct DecimateStateT : DecimateState {
+    DecimateStateT(int factor, int channels) : converter(factor, channels) {}
+
+    size_t convert(uint8_t *target, uint8_t *src, size_t size) override {
+      return converter.convert(target, src, size);
+    }
+
+    void reset() override { converter.reset(); }
+
+    DecimateT<T> converter;
+  };
+
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (factor <= 0) {
+      LOGE("Decimation factor must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resetState() {
+    delete state;
+    state = nullptr;
+  }
+
+  int channels = 2;
+  int bits = 16;
+  int factor = 1;
+  DecimateState *state = nullptr;
+};
+
+/**
+ * @brief We reduce the number of samples in a datastream by summing (binning)
+ * or averaging. This will result in the same number of channels but binSize
+ * times less samples. If Average is true the sum is divided by binSize.
+ * @author Urs Utzinger
+ * @ingroup convert
+ * @tparam T
+ */
+
+// Helper template to define the integer type for the summation based on input
+// data type T
+template <typename T = int16_t>
+struct AppropriateSumType {
+  using type = T;
+};
+
+template <>
+struct AppropriateSumType<int8_t> {
+  using type = int16_t;
+};
+
+template <>
+struct AppropriateSumType<int16_t> {
+  using type = int32_t;
+};
+
+template <>
+struct AppropriateSumType<int24_t> {
+  using type = int32_t;  // Assuming int24_t is a custom 24-bit integer type
+};
+
+template <>
+struct AppropriateSumType<int32_t> {
+  using type = int64_t;
+};
+
+template <typename T = int16_t>
+class BinT : public BaseConverter {
+ public:
+  BinT() = default;
+  BinT(int binSize, int channels, bool average) {
+    setChannels(channels);
+    setBinSize(binSize);
+    setAverage(average);
+    resetState();
+  }
+
+  ~BinT() { delete[] this->partialBin; }
+
+  void setChannels(int channels) {
+    this->channels = channels;
+    resizeState();
+  }
+  void setBinSize(int binSize) {
+    this->binSize = binSize;
+    resetState();
+  }
+  void setAverage(bool average) { this->average = average; }
+  void clear() { resetState(); }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+
+    // The binning takes the following into account
+    //  1) if size is too small it will add up data to partialBin and return 0
+    //  size 2) if there is sufficient data to fill Bins but there is partial
+    //  data remaining it will be added to the partial Bin 3) if there was
+    //  previous partial Bin it will be filled with the new data 4) if there is
+    //  insufficient new data to fill the partial Bin it will fill the partial
+    //  Bin with the new data
+
+    if (size % (sizeof(T) * channels) > 0) {
+      LOGE("Buffer size %d is not a multiple of the number of channels %d",
+           (int)size, channels);
+      return 0;
+    }
+
+    T *p_target = (T *)target;
+    T *p_source = (T *)src;
+    size_t result_size = 0;
+    int sample_count = size / (sizeof(T) * channels);
+
+    for (int sample = 0; sample < sample_count; sample++) {
+      for (int ch = 0; ch < channels; ch++) {
+        partialBin[ch] += p_source[sample * channels + ch];
+      }
+      partialBinSize++;
+
+      if (partialBinSize == binSize) {
+        for (int ch = 0; ch < channels; ch++) {
+          p_target[result_size / sizeof(T)] =
+              average ? static_cast<T>(partialBin[ch] / binSize)
+                      : static_cast<T>(partialBin[ch]);
+          result_size += sizeof(T);
+        }
+        resetState();
+      }
+    }
+
+    LOGD("bin %d: processed %d samples, %d remaining, %d > %d bytes", binSize,
+         sample_count, partialBinSize, (int)size, (int)result_size);
+
+    return result_size;
+  }
+
+ protected:
+  using SumT = typename AppropriateSumType<T>::type;
+
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (binSize <= 0) {
+      LOGE("Bin size must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resizeState() {
+    delete[] partialBin;
+    partialBin = channels > 0 ? new SumT[channels]() : nullptr;
+    partialBinSize = 0;
+  }
+
+  void resetState() {
+    if (partialBin == nullptr && channels > 0) {
+      partialBin = new SumT[channels]();
+    } else if (partialBin != nullptr) {
+      for (int ch = 0; ch < channels; ch++) {
+        partialBin[ch] = 0;
+      }
+    }
+    partialBinSize = 0;
+  }
+
+  int channels = 2;
+  int binSize = 1;
+  bool average = true;
+  SumT *partialBin = nullptr;
+  int partialBinSize = 0;
+};
+
+/**
+ * @brief Provides reduced sampling rates through binning
+ * @ingroup convert
+ */
+
+class Bin : public BaseConverter {
+ public:
+  Bin() = default;
+  Bin(int binSize, int channels, bool average, int bits_per_sample) {
+    setChannels(channels);
+    setBinSize(binSize);
+    setAverage(average);
+    setBits(bits_per_sample);
+  }
+  ~Bin() override { delete state; }
+
+  void setChannels(int channels) {
+    this->channels = channels;
+    resetState();
+  }
+  void setBits(int bits) {
+    this->bits = bits;
+    resetState();
+  }
+  void setBinSize(int binSize) {
+    this->binSize = binSize;
+    resetState();
+  }
+  void setAverage(bool average) {
+    this->average = average;
+    resetState();
+  }
+  void clear() {
+    if (state != nullptr) {
+      state->reset();
+    }
+  }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+    if (state == nullptr) {
+      switch (bits) {
+        case 8:
+          state = new BinStateT<int8_t>(binSize, channels, average);
+          break;
+        case 16:
+          state = new BinStateT<int16_t>(binSize, channels, average);
+          break;
+        case 24:
+          state = new BinStateT<int24_t>(binSize, channels, average);
+          break;
+        case 32:
+          state = new BinStateT<int32_t>(binSize, channels, average);
+          break;
+        default:
+          LOGE("Number of bits %d not supported.", bits);
+          return 0;
+      }
+    }
+    return state->convert(target, src, size);
+  }
+
+ protected:
+  struct BinState {
+    virtual ~BinState() = default;
+    virtual size_t convert(uint8_t *target, uint8_t *src, size_t size) = 0;
+    virtual void reset() = 0;
+  };
+
+  template <typename T>
+  struct BinStateT : BinState {
+    BinStateT(int binSize, int channels, bool average)
+        : converter(binSize, channels, average) {}
+
+    size_t convert(uint8_t *target, uint8_t *src, size_t size) override {
+      return converter.convert(target, src, size);
+    }
+
+    void reset() override { converter.reset(); }
+
+    BinT<T> converter;
+  };
+
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (binSize <= 0) {
+      LOGE("Bin size must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resetState() {
+    delete state;
+    state = nullptr;
+  }
+
+  int channels = 2;
+  int bits = 16;
+  int binSize = 1;
+  bool average = false;
+  BinState *state = nullptr;
+};
+
+/**
+ * @brief We calculate the difference between pairs of channels in a datastream.
+ *  E.g. if we have 4 channels we end up with 2 channels.
+ *  The channels will be
+ *  channel_1 - channel_2
+ *  channel_3 - channel_4
+ * This is similar to background subtraction between two channels but will
+ * also work for quadric, sexic or octic audio.
+ * This will not work if you provide single channel data!
+ * @author Urs Utzinger
+ * @ingroup convert
+ * @tparam T
+ */
+
+template <typename T = int16_t>
+class ChannelDiffT : public BaseConverter {
+ public:
+  ChannelDiffT() {}
+
+  size_t convert(uint8_t *src, size_t size) override {
+    return convert(src, src, size);
+  }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    LOGD("channel subtract %d samples, %d bytes", (int)(size / sizeof(T)),
+         (int)size);
+
+    // Ensure the buffer size is even for pairs of channels
+    if (size % (sizeof(T) * 2) > 0) {
+      LOGE("Buffer size is not even");
+      return 0;
+    }
+
+    int sample_count =
+        size /
+        (sizeof(T) * 2);  // Each pair of channels produces one output sample
+    T *p_result = (T *)target;
+    T *p_source = (T *)src;
+
+    for (int i = 0; i < sample_count; i++) {
+      // *p_result++ = *p_source++ - *p_source++;
+      auto tmp = *p_source++;
+      tmp -= *p_source++;
+      *p_result++ = tmp;
+    }
+
+    return sizeof(T) * sample_count;
+  }
+};
+
+class ChannelDiff : public BaseConverter {
+ public:
+  ChannelDiff() = default;
+  ChannelDiff(int bitsPerSample) { setBits(bitsPerSample); }
+  void setBits(int bits) { this->bits = bits; }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    switch (bits) {
+      case 8: {
+        ChannelDiffT<int8_t> cd8;
+        return cd8.convert(target, src, size);
+      }
+      case 16: {
+        ChannelDiffT<int16_t> cd16;
+        return cd16.convert(target, src, size);
+      }
+      case 24: {
+        ChannelDiffT<int24_t> cd24;
+        return cd24.convert(target, src, size);
+      }
+      case 32: {
+        ChannelDiffT<int32_t> cd32;
+        return cd32.convert(target, src, size);
+      }
+      default: {
+        LOGE("Number of bits %d not supported.", bits);
+        return 0;
+      }
+    }
+  }
+
+ protected:
+  int bits = 16;
+};
+
+
+/**
+ * @brief We mix all input channels in a datastream. E.g. if we have stereo input data
+ * we end up with 2 identical mono channels. 
+ * @author Phil Schatzmann
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t, typename SumT = float>
+class ChannelMixer : public BaseConverter {
+ public:
+  ChannelMixer(int channels = 2) { this->channels = channels; }
+  size_t convert(uint8_t *data, size_t size) {
+    if (channels <= 1) return size;  // No mixing needed for single channel
+    T *srcT = (T *)data;
+    T *targetT = (T *)data;
+    int samples = size / sizeof(T);
+    assert(samples % channels == 0);
+    for (int j = 0; j < samples; j += channels) {
+      SumT sum = 0;
+      for (int ch = 0; ch < channels; ch++) {
+        sum += srcT[j + ch];
+      }
+      T avg = sum / channels;
+      for (int ch = 0; ch < channels; ch++) {
+        targetT[j + ch] = avg;
+      }
+    }
+    return size;
+  }
+
+ protected:
+  int channels = 2;
+};
+
+/**
+ * @brief We average pairs of channels in a datastream.
+ *  E.g. if we have 4 channels we end up with 2 channels.
+ *  The channels will be
+ *  (channel_1 + channel_2)/2
+ *  (channel_3 - channel_4)/2.
+ * This is equivalent of stereo to mono conversion but will
+ * also work for quadric, sexic or octic audio.
+ * This will not work if you provide single channel data!
+ * @author Urs Utzinger
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t, typename AvgT = float>
+class ChannelAvgT : public BaseConverter {
+ public:
+  ChannelAvgT() {}
+
+  size_t convert(uint8_t *src, size_t size) override {
+    return convert(src, src, size);
+  }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (size % (sizeof(T) * 2) > 0) {
+      LOGE("Buffer size is not even");
+      return 0;
+    }
+
+    int sample_count =
+        size /
+        (sizeof(T) * 2);  // Each pair of channels produces one output sample
+    T *p_result = (T *)target;
+    T *p_source = (T *)src;
+
+    for (int i = 0; i < sample_count; i++) {
+      // *p_result++ = (*p_source++ + *p_source++) / 2; // Average the pair of
+      // channels
+      AvgT tmp = *p_source++;
+      tmp += *p_source++;
+      *p_result++ = tmp / 2;
+    }
+
+    LOGD("channel average %d samples, %d bytes", sample_count, (int)size);
+
+    return sizeof(T) * sample_count;
+  }
+};
+
+
+/**
+ * @brief We average pairs of channels in a datastream.
+ *  E.g. if we have 4 channels we end up with 2 channels.
+ *  The channels will be
+ *  (channel_1 + channel_2)/2
+ *  (channel_3 - channel_4)/2.
+ * This is equivalent of stereo to mono conversion but will
+ * also work for quadric, sexic or octic audio.
+ * This will not work if you provide single channel data!
+ * @author Urs Utzinger
+ * @ingroup convert
+ */
+
+class ChannelAvg : public BaseConverter {
+ public:
+  ChannelAvg() = default;
+  ChannelAvg(int bitsPerSample) { setBits(bitsPerSample); }
+  void setBits(int bits) { this->bits = bits; }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    switch (bits) {
+#ifdef PREFER_FIXEDPOINT
+      case 8: {
+        ChannelAvgT<int8_t, int16_t> ca8;
+        return ca8.convert(target, src, size);
+      }
+      case 16: {
+        ChannelAvgT<int16_t, int32_t> ca16;
+        return ca16.convert(target, src, size);
+      }
+      case 24: {
+        ChannelAvgT<int24_t, int32_t> ca24;
+        return ca24.convert(target, src, size);
+      }
+#else
+      case 8: {
+        ChannelAvgT<int8_t, float> ca8;
+        return ca8.convert(target, src, size);
+      }
+      case 16: {
+        ChannelAvgT<int16_t, float> ca16;
+        return ca16.convert(target, src, size);
+      }
+      case 24: {
+        ChannelAvgT<int24_t, float> ca24;
+        return ca24.convert(target, src, size);
+      }
+#endif
+      case 32: {
+        ChannelAvgT<int32_t, float> ca32;
+        return ca32.convert(target, src, size);
+      }
+      default: {
+        LOGE("Number of bits %d not supported.", bits);
+        return 0;
+      }
+    }
+  }
+
+ protected:
+  int bits = 16;
+};
+
+/**
+ * @brief We first bin the channels then we calculate the difference between
+ * pairs of channels in a datastream. E.g. For binning, if we bin 4 samples
+ * in each channel we will have 4 times less samples per channel E.g. For
+ * subtracting if we have 4 channels we end up with 2 channels. The channels
+ * will be channel_1 - channel_2 channel_3 - channel_4 This is the same as
+ * combining binning and subtracting channels. This will not work if you
+ * provide single channel data!
+ * @author Urs Utzinger
+ * @ingroup convert
+ * @tparam T
+ */
+
+template <typename T = int16_t>
+class ChannelBinDiffT : public BaseConverter {
+ public:
+  ChannelBinDiffT() = default;
+  ChannelBinDiffT(int binSize, int channels, bool average) {
+    setChannels(channels);
+    setBinSize(binSize);
+    setAverage(average);
+    resetState();
+  }
+
+  ~ChannelBinDiffT() { delete[] this->partialBin; }
+
+  void setChannels(int channels) {
+    if ((channels % 2) > 0) {
+      LOGE("Number of channels needs to be even");
+      this->channels = channels + 1;
+    } else {
+      this->channels = channels;
+    }
+    resizeState();
+  }
+  void setBinSize(int binSize) {
+    this->binSize = binSize;
+    resetState();
+  }
+  void setAverage(bool average) { this->average = average; }
+  void clear() { resetState(); }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+
+    // The binning works the same as in the BinT class
+    // Here we add subtraction before we store the bins
+
+    if (size % (sizeof(T) * channels) > 0) {
+      LOGE("Buffer size needs to be multiple of channels");
+      return 0;
+    }
+
+    T *p_target = (T *)target;
+    T *p_source = (T *)src;
+    size_t result_size = 0;
+    int sample_count = size / (sizeof(T) * channels);
+
+    for (int sample = 0; sample < sample_count; sample++) {
+      for (int ch = 0; ch < channels; ch++) {
+        partialBin[ch] += p_source[sample * channels + ch];
+      }
+      partialBinSize++;
+
+      if (partialBinSize == binSize) {
+        for (int ch = 0; ch < channels; ch += 2) {
+          SumT diff = partialBin[ch] - partialBin[ch + 1];
+          p_target[result_size / sizeof(T)] =
+              average ? static_cast<T>(diff / binSize)
+                      : static_cast<T>(diff);
+          result_size += sizeof(T);
+        }
+        resetState();
+      }
+    }
+
+    LOGD(
+        "bin & channel subtract %d: processed %d samples, %d remaining, %d > "
+        "%d bytes",
+        binSize, sample_count, partialBinSize, (int)size,
+        (int)result_size);
+
+    return result_size;
+  }
+
+ protected:
+  using SumT = typename AppropriateSumType<T>::type;
+
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (binSize <= 0) {
+      LOGE("Bin size must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resizeState() {
+    delete[] partialBin;
+    partialBin = channels > 0 ? new SumT[channels]() : nullptr;
+    partialBinSize = 0;
+  }
+
+  void resetState() {
+    if (partialBin == nullptr && channels > 0) {
+      partialBin = new SumT[channels]();
+    } else if (partialBin != nullptr) {
+      for (int ch = 0; ch < channels; ch++) {
+        partialBin[ch] = 0;
+      }
+    }
+    partialBinSize = 0;
+  }
+
+  int channels = 2;
+  int binSize = 4;
+  bool average = true;
+  SumT *partialBin = nullptr;
+  int partialBinSize = 0;
+};
+
+/**
+ * @brief Provides combination of binning and subtracting channels
+ * @author Urs Utzinger
+ * @ingroup convert
+ * @tparam T
+ */
+
+class ChannelBinDiff : public BaseConverter {
+ public:
+  ChannelBinDiff() = default;
+  ChannelBinDiff(int binSize, int channels, bool average, int bits_per_sample) {
+    setChannels(channels);
+    setBinSize(binSize);
+    setAverage(average);
+    setBits(bits_per_sample);
+  }
+  ~ChannelBinDiff() override { delete state; }
+
+  void setChannels(int channels) {
+    if ((channels % 2) == 0) {
+      this->channels = channels;
+    } else {
+      LOGE("Number of channels needs to be even");
+      this->channels = channels + 1;
+    }
+    resetState();
+  }
+
+  void setBits(int bits) {
+    this->bits = bits;
+    resetState();
+  }
+  void setBinSize(int binSize) {
+    this->binSize = binSize;
+    resetState();
+  }
+  void setAverage(bool average) {
+    this->average = average;
+    resetState();
+  }
+  void clear() {
+    if (state != nullptr) {
+      state->reset();
+    }
+  }
+  void reset() { clear(); }
+
+  size_t convert(uint8_t *src, size_t size) { return convert(src, src, size); }
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (!isConfigValid()) return 0;
+    if (state == nullptr) {
+      switch (bits) {
+        case 8:
+          state = new ChannelBinDiffStateT<int8_t>(binSize, channels, average);
+          break;
+        case 16:
+          state = new ChannelBinDiffStateT<int16_t>(binSize, channels, average);
+          break;
+        case 24:
+          state = new ChannelBinDiffStateT<int24_t>(binSize, channels, average);
+          break;
+        case 32:
+          state = new ChannelBinDiffStateT<int32_t>(binSize, channels, average);
+          break;
+        default:
+          LOGE("Number of bits %d not supported.", bits);
+          return 0;
+      }
+    }
+    return state->convert(target, src, size);
+  }
+
+ protected:
+  struct ChannelBinDiffState {
+    virtual ~ChannelBinDiffState() = default;
+    virtual size_t convert(uint8_t *target, uint8_t *src, size_t size) = 0;
+    virtual void reset() = 0;
+  };
+
+  template <typename T>
+  struct ChannelBinDiffStateT : ChannelBinDiffState {
+    ChannelBinDiffStateT(int binSize, int channels, bool average)
+        : converter(binSize, channels, average) {}
+
+    size_t convert(uint8_t *target, uint8_t *src, size_t size) override {
+      return converter.convert(target, src, size);
+    }
+
+    void reset() override { converter.reset(); }
+
+    ChannelBinDiffT<T> converter;
+  };
+
+  bool isConfigValid() {
+    if (channels <= 0) {
+      LOGE("Number of channels must be > 0");
+      return false;
+    }
+    if (binSize <= 0) {
+      LOGE("Bin size must be > 0");
+      return false;
+    }
+    return true;
+  }
+
+  void resetState() {
+    delete state;
+    state = nullptr;
+  }
+
+  int channels = 2;
+  int bits = 16;
+  int binSize = 4;
+  bool average = true;
+  ChannelBinDiffState *state = nullptr;
+};
+
+/**
+ * @brief Increases the channel count
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ChannelEnhancer {
+ public:
+  ChannelEnhancer() = default;
+
+  ChannelEnhancer(int channelCountOfTarget, int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+    to_channels = channelCountOfTarget;
+  }
+
+  void setSourceChannels(int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+  }
+
+  void setTargetChannels(int channelCountOfTarget) {
+    to_channels = channelCountOfTarget;
+  }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (from_channels == 0) return size;
+    int frame_count = size / (sizeof(T) * from_channels);
+    size_t result_size = 0;
+    T *result = (T *)target;
+    T *source = (T *)src;
+    T value = (int16_t)0;
+    for (int i = 0; i < frame_count; i++) {
+      // copy available channels
+      for (int j = 0; j < from_channels; j++) {
+        value = *source++;
+        *result++ = value;
+        result_size += sizeof(T);
+      }
+      // repeat last value
+      for (int j = from_channels; j < to_channels; j++) {
+        *result++ = value;
+        result_size += sizeof(T);
+      }
+    }
+    return result_size;
+  }
+
+  /// Determine the size of the conversion result
+  size_t resultSize(size_t inSize) {
+    return inSize * to_channels / from_channels;
+  }
+
+ protected:
+  int from_channels = 0;
+  int to_channels = 0;
+};
+
+/**
+ * @brief Increasing or decreasing the number of channels
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ChannelConverter {
+ public:
+  ChannelConverter() = default;
+
+  ChannelConverter(int channelCountOfTarget, int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+    to_channels = channelCountOfTarget;
+  }
+
+  void setSourceChannels(int channelCountOfSource) {
+    from_channels = channelCountOfSource;
+  }
+
+  void setTargetChannels(int channelCountOfTarget) {
+    to_channels = channelCountOfTarget;
+  }
+
+  size_t convert(uint8_t *target, uint8_t *src, size_t size) {
+    if (from_channels == to_channels) {
+      memcpy(target, src, size);
+      return size;
+    }
+    // setup channels
+    if (from_channels > to_channels) {
+      reducer.setSourceChannels(from_channels);
+      reducer.setTargetChannels(to_channels);
+    } else {
+      enhancer.setSourceChannels(from_channels);
+      enhancer.setTargetChannels(to_channels);
+    }
+
+    // execute conversion
+    if (from_channels > to_channels) {
+      return reducer.convert(target, src, size);
+    } else {
+      return enhancer.convert(target, src, size);
+    }
+  }
+
+ protected:
+  ChannelEnhancer<T> enhancer;
+  ChannelReducerT<T> reducer;
+  int from_channels;
+  int to_channels;
+};
+
+/**
+ * @brief Combines multiple converters
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class MultiConverter : public BaseConverter {
+ public:
+  MultiConverter() {}
+
+  MultiConverter(BaseConverter &c1) { add(c1); }
+
+  MultiConverter(BaseConverter &c1, BaseConverter &c2) {
+    add(c1);
+    add(c2);
+  }
+
+  MultiConverter(BaseConverter &c1, BaseConverter &c2, BaseConverter &c3) {
+    add(c1);
+    add(c2);
+    add(c3);
+  }
+
+  // adds a converter
+  void add(BaseConverter &converter) { converters.push_back(&converter); }
+
+  // The data is provided as int24_t tgt[][2] but  returned as int24_t
+  size_t convert(uint8_t *src, size_t size) {
+    for (int i = 0; i < converters.size(); i++) {
+      converters[i]->convert(src, size);
+    }
+    return size;
+  }
+
+ private:
+  Vector<BaseConverter *> converters;
+};
+
+/**
+ * @brief Reads n numbers from an Arduino Stream
+ *
+ */
+class NumberReader {
+ public:
+  NumberReader(Stream &in) { stream_ptr = &in; }
+
+  NumberReader() {}
+
+  bool read(int inBits, int outBits, bool outSigned, int n, int32_t *result) {
+    bool result_bool = false;
+    int len = inBits / 8 * n;
+    if (stream_ptr != nullptr && stream_ptr->available() > len) {
+      uint8_t buffer[len];
+      stream_ptr->readBytes((uint8_t *)buffer, n * len);
+      result_bool =
+          toNumbers((void *)buffer, inBits, outBits, outSigned, n, result);
+    }
+    return result_bool;
+  }
+
+  /// converts a buffer to a number array
+  bool toNumbers(void *bufferIn, int inBits, int outBits, bool outSigned, int n,
+                 int32_t *result) {
+    bool result_bool = false;
+    switch (inBits) {
+      case 8: {
+        int8_t *buffer = (int8_t *)bufferIn;
+        for (int j = 0; j < n; j++) {
+          result[j] = scale(buffer[j], inBits, outBits, outSigned);
+        }
+        result_bool = true;
+      } break;
+      case 16: {
+        int16_t *buffer = (int16_t *)bufferIn;
+        for (int j = 0; j < n; j++) {
+          result[j] = scale(buffer[j], inBits, outBits, outSigned);
+        }
+        result_bool = true;
+      } break;
+      case 32: {
+        int32_t *buffer = (int32_t *)bufferIn;
+        for (int j = 0; j < n; j++) {
+          result[j] = scale(buffer[j], inBits, outBits, outSigned);
+        }
+        result_bool = true;
+      } break;
+    }
+    return result_bool;
+  }
+
+ protected:
+  Stream *stream_ptr = nullptr;
+
+  /// scale the value
+  int32_t scale(int32_t value, int inBits, int outBits, bool outSigned = true) {
+    int32_t result = static_cast<float>(value) /
+                     NumberConverter::maxValue(inBits) *
+                     NumberConverter::maxValue(outBits);
+    if (!outSigned) {
+      result += (NumberConverter::maxValue(outBits) / 2);
+    }
+    return result;
+  }
+};
+
+/**
+ * @brief Converter for 1 Channel which applies the indicated Filter
+ * @ingroup convert
+ * @author pschatzmann
+ * @tparam T
+ */
+template <typename T = int16_t>
+class Converter1Channel : public BaseConverter {
+ public:
+  Converter1Channel(Filter<T> &filter) { this->p_filter = &filter; }
+
+  size_t convert(uint8_t *src, size_t size) override {
+    T *data = (T *)src;
+    for (size_t j = 0; j < size; j++) {
+      data[j] = p_filter->process(data[j]);
+    }
+    return size;
+  }
+
+ protected:
+  Filter<T> *p_filter = nullptr;
+};
+
+/**
+ * @brief Converter for n Channels which applies the indicated Filter
+ * @ingroup convert
+ * @author pschatzmann
+ * @tparam T
+ */
+template <typename T, typename FT>
+class ConverterNChannels : public BaseConverter {
+ public:
+  /// Default Constructor
+  ConverterNChannels(int channels) {
+    this->channels = channels;
+    filters.resize(channels);
+    for (int j = 0; j < channels; j++) {
+      filters[j] = nullptr;
+    }
+  }
+
+  /// defines the filter for an individual channel - the first channel is 0
+  void setFilter(int channel, Filter<FT> *filter) {
+    if (channel < channels) {
+      filters[channel] = filter;
+    } else {
+      LOGE("Invalid channel nummber %d - max channel is %d", channel,
+           channels - 1);
+    }
+  }
+
+  /// returns the filter for the indicated channel
+  Filter<FT> *getFilter(int channel) {
+    if (channel < channels) return filters[channel];
+    return nullptr;
+  }
+
+
+  // convert all samples for each channel separately
+  size_t convert(uint8_t *src, size_t size) {
+    int count = size / channels / sizeof(T);
+    T *sample = (T *)src;
+    for (size_t j = 0; j < count; j++) {
+      for (int channel = 0; channel < channels; channel++) {
+        if (filters[channel] != nullptr) {
+          *sample = filters[channel]->process(*sample);
+        }
+        sample++;
+      }
+    }
+    return size;
+  }
+
+  int getChannels() { return channels; }
+
+  /// dynamically change the number of channels; existing filters for valid
+  /// indices are preserved, new slots are initialized to nullptr
+  void setChannels(int newChannels) {
+    if (newChannels == channels) return;
+    int oldChannels = channels;
+    channels = newChannels;
+    filters.resize(newChannels);
+    // initialize new slots
+    for (int j = oldChannels; j < newChannels; j++) {
+      filters[j] = nullptr;
+    }
+  }
+
+ protected:
+  Vector<Filter<FT> *> filters;
+  int channels = 0;
+};
+
+/**
+ * @brief Removes any silence from the buffer that is longer then n samples
+ * with a amplitude below the indicated threshhold. If you process multiple
+ * channels you need to multiply the channels with the number of samples to
+ * indicate n
+ * @ingroup convert
+ * @tparam T
+ */
+
+template <typename T = int16_t>
+class SilenceRemovalConverter : public BaseConverter {
+ public:
+  SilenceRemovalConverter(int n = 8, int aplidudeLimit = 2) {
+    set(n, aplidudeLimit);
+  }
+
+  void clear() { priorLastAudioPos = n + 1; }
+  void reset() { clear(); }
+
+  virtual size_t convert(uint8_t *data, size_t size) override {
+    if (!active) {
+      // no change to the data
+      return size;
+    }
+    size_t sample_count = size / sizeof(T);
+    size_t write_count = 0;
+    T *audio = (T *)data;
+
+    // find relevant data
+    T *p_buffer = (T *)data;
+    for (int j = 0; j < sample_count; j++) {
+      int pos = findLastAudioPos(audio, j);
+      if (pos < n) {
+        write_count++;
+        *p_buffer++ = audio[j];
+      }
+    }
+
+    // write audio data w/o silence
+    size_t write_size = write_count * sizeof(T);
+    LOGI("filtered silence from %d -> %d", (int)size, (int)write_size);
+
+    // number of empty samples of prior buffer
+    priorLastAudioPos = findLastAudioPos(audio, sample_count - 1);
+
+    // return new data size
+    return write_size;
+  }
+
+ protected:
+  bool active = false;
+  const uint8_t *buffer = nullptr;
+  int n;
+  int priorLastAudioPos = 0;
+  int amplidude_limit = 0;
+
+  void set(int n = 5, int aplidudeLimit = 2) {
+    LOGI("begin(n=%d, aplidudeLimit=%d", n, aplidudeLimit);
+    this->n = n;
+    this->amplidude_limit = aplidudeLimit;
+    this->priorLastAudioPos = n + 1;  // ignore first values
+    this->active = n > 0;
+  }
+
+  // find last position which contains audible data
+  int findLastAudioPos(T *audio, int pos) {
+    for (int j = 0; j < n; j++) {
+      // we are before the start of the current buffer
+      if (pos - j <= 0) {
+        return priorLastAudioPos;
+      }
+      // we are in the current buffer
+      if (abs(audio[pos - j]) > amplidude_limit) {
+        return j;
+      }
+    }
+    return n + 1;
+  }
+};
+
+/**
+ * @brief Big value gaps (at the beginning and the end of a recording) can
+ * lead to some popping sounds. We will try to set the values to 0 until the
+ * first transition thru 0 of the audio curve
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class PoppingSoundRemover : public BaseConverter {
+ public:
+  PoppingSoundRemover(int channels, bool fromBeginning, bool fromEnd) {
+    this->channels = channels;
+    from_beginning = fromBeginning;
+    from_end = fromEnd;
+  }
+  virtual size_t convert(uint8_t *src, size_t size) {
+    for (int ch = 0; ch < channels; ch++) {
+      if (from_beginning)
+        clearUpTo1stTransition(channels, ch, (T *)src, size / sizeof(T));
+      if (from_end)
+        clearAfterLastTransition(channels, ch, (T *)src, size / sizeof(T));
+    }
+    return size;
+  }
+
+ protected:
+  bool from_beginning;
+  bool from_end;
+  int channels;
+
+  void clearUpTo1stTransition(int channels, int channel, T *values,
+                              int sampleCount) {
+    T first = values[channel];
+    for (int j = 0; j < sampleCount; j += channels) {
+      T act = values[j];
+      if ((first <= 0.0 && act >= 0.0) || (first >= 0.0 && act <= 0.0)) {
+        // we found the last transition so we are done
+        break;
+      } else {
+        values[j] = 0;
+      }
+    }
+  }
+
+  void clearAfterLastTransition(int channels, int channel, T *values,
+                                int sampleCount) {
+    int lastPos = sampleCount - channels + channel;
+    T last = values[lastPos];
+    for (int j = lastPos; j >= 0; j -= channels) {
+      T act = values[j];
+      if ((last <= 0.0 && act >= 0.0) || (last >= 0.0 && act <= 0.0)) {
+        // we found the last transition so we are done
+        break;
+      } else {
+        values[j] = 0;
+      }
+    }
+  }
+};
+
+/**
+ * @brief Changes the samples at the beginning or at the end to slowly ramp
+ * up the volume
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class SmoothTransition : public BaseConverter {
+ public:
+  SmoothTransition(int channels, bool fromBeginning, bool fromEnd,
+                   float inc = 0.01) {
+    this->channels = channels;
+    this->inc = inc;
+    from_beginning = fromBeginning;
+    from_end = fromEnd;
+  }
+  void clear() {
+    start_factor = 0;
+    end_factor = 0;
+  }
+  void reset() { clear(); }
+  virtual size_t convert(uint8_t *src, size_t size) {
+    int sample_count = size / sizeof(T);
+    int frame_count = channels > 0 ? sample_count / channels : 0;
+    if (from_beginning) processStart((T *)src, frame_count);
+    if (from_end) processEnd((T *)src, frame_count);
+    return size;
+  }
+
+ protected:
+  bool from_beginning;
+  bool from_end;
+  int channels;
+  float inc = 0.01;
+  float start_factor = 0;
+  float end_factor = 0;
+
+  void processStart(T *values, int frameCount) {
+    float factor = start_factor;
+    for (int frame = 0; frame < frameCount; ++frame) {
+      if (factor >= 0.8) {
+        break;
+      }
+      int pos = frame * channels;
+      for (int ch = 0; ch < channels; ++ch) {
+        values[pos + ch] = factor * values[pos + ch];
+      }
+      factor += inc;
+    }
+    start_factor = factor;
+  }
+
+  void processEnd(T *values, int frameCount) {
+    float factor = end_factor;
+    for (int frame = frameCount - 1; frame >= 0; --frame) {
+      if (factor >= 0.8) {
+        break;
+      }
+      int pos = frame * channels;
+      for (int ch = 0; ch < channels; ++ch) {
+        values[pos + ch] = factor * values[pos + ch];
+      }
+      factor += inc;
+    }
+    end_factor = factor;
+  }
+};
+
+/**
+ * @brief Copy channel Cx value of type T shifted by S bits to all Cn
+ * channels
+ * @ingroup convert
+ * @tparam T, Cn, Cx, S
+ */
+template <typename T, size_t Cn, size_t Cx, size_t S>
+class CopyChannels : public BaseConverter {
+ public:
+  CopyChannels() : _max_val(0), _counter(0), _prev_ms(0) {}
+
+  size_t convert(uint8_t *src, size_t size) {
+    T *chan = (T *)src;
+    size_t samples = (size / Cn) / sizeof(T);
+    for (size_t s = 0; s < samples; s++) {
+      chan[s * Cn + Cx] = (Cx < Cn) ? chan[s * Cn + Cx] << S : 0;
+
+      for (size_t c = 0; c < Cn; c++) {
+        if (c != Cx) {
+          chan[s * Cn + c] = chan[s * Cn + Cx];
+        }
+      }
+
+      if (_max_val < chan[s * Cn]) {
+        _max_val = chan[s * Cn];
+      }
+
+      _counter++;
+      uint32_t now = millis();
+      if (now - _prev_ms > 1000) {
+        _prev_ms = now;
+        LOGI("CopyChannels samples: %u, amplitude: %d", _counter, _max_val);
+        _max_val = 0;
+      }
+    }
+    return samples * Cn * sizeof(T);
+  }
+
+ private:
+  T _max_val;
+  uint32_t _counter;
+  uint32_t _prev_ms;
+};
+
+/**
+ * @brief Inverts the signal (multiplies every sample by -1)
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class ConverterInvert : public BaseConverter {
+ public:
+  size_t convert(uint8_t *src, size_t size) override {
+    T *data = (T *)src;
+    int samples = size / sizeof(T);
+    for (int j = 0; j < samples; j++) {
+      data[j] = -data[j];
+    }
+    return size;
+  }
+};
+
+/**
+ * @brief You can provide a lambda expression to convert the data
+ * @ingroup convert
+ * @tparam T
+ */
+template <typename T = int16_t>
+class CallbackConverterT : public BaseConverter {
+ public:
+  CallbackConverterT() = default;
+  CallbackConverterT(T (*callback)(T in, int channel), int channels = 2) {
+    setCallback(callback, channels);
+  }
+
+  void setCallback(T (*callback)(T in, int channel), int channels) {
+    this->callback = callback;
+    this->channels = channels;
+  }
+
+  size_t convert(uint8_t *src, size_t size) {
+    // no conversion if no callback is provided
+    if (callback == nullptr) {
+      return size;
+    }
+    int samples = size / sizeof(T);
+    T *srcT = (T *)src;
+    for (int j = 0; j < samples; j++) {
+      srcT[j] = callback(srcT[j], j % channels);
+    }
+    return size;
+  }
+
+ protected:
+  T (*callback)(T in, int channel) = nullptr;
+  int channels = 2;
+};
+
+/// CallbackConverter with int16_t as default type
+using CallbackConverter = CallbackConverterT<int16_t>;
+
+}  // namespace audio_tools

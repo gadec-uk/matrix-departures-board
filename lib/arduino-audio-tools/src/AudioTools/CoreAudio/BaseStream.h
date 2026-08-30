@@ -1,0 +1,738 @@
+#pragma once
+#include "AudioTools/CoreAudio/Buffers.h"
+#include "AudioTools/CoreAudio/AudioTypes.h"
+#include "AudioTools/CoreAudio/BaseConverter.h"
+
+#ifdef ARDUINO
+#include "Stream.h"
+#endif
+
+#ifdef USE_STREAM_WRITE_OVERRIDE
+#define STREAM_WRITE_OVERRIDE override
+#else
+#define STREAM_WRITE_OVERRIDE
+#endif
+
+#ifdef USE_STREAM_READ_OVERRIDE
+#define STREAM_READ_OVERRIDE override
+#else
+#define STREAM_READ_OVERRIDE
+#endif
+
+#ifdef USE_STREAM_READCHAR_OVERRIDE
+#define STREAM_READCHAR_OVERRIDE override
+#else
+#define STREAM_READCHAR_OVERRIDE
+#endif
+
+namespace audio_tools {
+
+/**
+ * @brief Base class for all Streams. It relies on write(const uint8_t *buffer,
+ * size_t size) and readBytes(uint8_t *buffer, size_t length).
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+class BaseStream : public Stream {
+ public:
+  BaseStream() = default;
+  virtual ~BaseStream() = default;
+  BaseStream(BaseStream &) = default;
+  BaseStream &operator=(BaseStream &) = default;
+
+  virtual bool begin(){return true;}
+  virtual void end(){}
+
+  virtual size_t readBytes(uint8_t *data,
+                           size_t len) STREAM_READ_OVERRIDE = 0;
+  virtual size_t write(const uint8_t *data, size_t len) override = 0;
+
+  virtual size_t write(uint8_t ch) override {
+    tmp_out.resize(write_buffer_size);
+    if (tmp_out.isFull()) {
+      flush();
+    }
+    return tmp_out.write(ch);
+  }
+
+  virtual int available() override { return DEFAULT_BUFFER_SIZE; };
+
+  virtual int availableForWrite() override { return DEFAULT_BUFFER_SIZE; }
+
+  virtual void flush() override {
+    if (tmp_out.available() > 0) {
+      write((const uint8_t *)tmp_out.address(), tmp_out.available());
+    }
+  }
+
+// Methods which should be suppressed in the documentation
+#ifndef DOXYGEN
+
+  virtual size_t readBytes(char *data, size_t len) STREAM_READCHAR_OVERRIDE {
+    return readBytes((uint8_t *)data, len);
+  }
+
+  virtual int read() override {
+    refillReadBuffer();
+    // if it is empty we need to return an int -1
+    if (tmp_in.isEmpty()) return -1;
+    uint8_t result = 0;
+    if (!tmp_in.read(result)) return -1;
+    return result;
+  }
+
+  virtual int peek() override {
+    refillReadBuffer();
+    // if it is empty we need to return an int -1
+    if (tmp_in.isEmpty()) return -1;
+    uint8_t result = 0;
+    if (!tmp_in.peek(result)) return -1;
+    return result;
+  }
+
+#endif
+
+  void setWriteBufferSize(int size) { write_buffer_size = size;}
+
+ protected:
+  RingBuffer<uint8_t> tmp_in{0}; 
+  RingBuffer<uint8_t> tmp_out{0};
+  int write_buffer_size = MAX_SINGLE_CHARS;
+
+  /// Refill small read buffer (e.g. 8 bytes) to avoid single byte reads when calling read()
+  void refillReadBuffer() {
+    tmp_in.resize(DEFAULT_BUFFER_SIZE);
+    if (tmp_in.isEmpty()) {
+      TRACED();
+      const int len = tmp_in.size();
+      uint8_t bytes[len];
+      int len_eff = readBytes(bytes, len);
+      // LOGD("tmp_in available: %d / size: %d / to be written %d",
+      // tmp_in.available(), tmp_in.size(), len_eff);
+      tmp_in.writeArray(bytes, len_eff);
+    }
+  }
+};
+
+/**
+ * @brief Base class for all Audio Streams. It support the boolean operator to
+ * test if the object is ready with data
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+class AudioStream : public BaseStream, public AudioInfoSupport, public AudioInfoSource {
+ public:
+  AudioStream() = default;
+  virtual ~AudioStream() = default;
+  AudioStream(AudioStream &) = default;
+  AudioStream& operator=(AudioStream &) = default;
+  
+  // Call from subclass or overwrite to do something useful
+  virtual void setAudioInfo(AudioInfo newInfo) override {
+      TRACED();
+
+      if (info != newInfo){
+        info = newInfo;
+        info.logInfo("in:");
+      }
+      // replicate information
+      AudioInfo out_new = audioInfoOut();
+      if (out_new) {
+        out_new.logInfo("out:");
+        notifyAudioChange(out_new);
+      } 
+
+  }
+
+  virtual size_t readBytes(uint8_t *data, size_t len) override { return not_supported(0, "readBytes"); }
+
+  virtual size_t write(const uint8_t *data, size_t len) override{ return not_supported(0,"write"); }
+
+
+  virtual operator bool() { return info && available() > 0; }
+
+  virtual AudioInfo audioInfo() override {
+    return info;
+  }
+
+
+  /// Writes len bytes of silence (=0).
+  virtual void writeSilence(size_t len){
+    int16_t zero = 0;
+    for (int j=0;j<len/2;j++){
+      write((uint8_t*)&zero,2);
+    } 
+  }
+
+  /// Source to generate silence: just sets the buffer to 0
+  virtual size_t readSilence(uint8_t *buffer, size_t length)  { 
+    memset(buffer, 0, length);
+    return length;
+  }
+  
+ protected:
+  AudioInfo info;
+
+  virtual int not_supported(int out, const char *msg = "") {
+    LOGE("AudioStream: %s unsupported operation!", msg);
+    // trigger stacktrace
+    assert(false);
+    return out;
+  }
+
+};
+
+
+/**
+ * @brief Provides data from a concatenation of Streams. Please note that the
+ * provided Streams can be played only once! You will need to reset them (e.g.
+ * moving the file pointer to the beginning) and read them back if you want to
+ * process them a second time. The default timeout on the available() method is
+ * set to 0. This might be too small if you use e.g. a URLStream.
+ * If you set beginReset to true in the constructor, the system will automatically 
+ * reset the streams when begin() is called. 
+ * @ingroup io
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+class CatStream : public BaseStream {
+ public:
+  CatStream(bool beginReset = false) : begin_reset(beginReset) {}
+
+  void add(Stream *stream) { 
+    if (begin_reset)
+      all_streams.push_back(stream); 
+    else
+      input_streams.push_back(stream); 
+  }
+  void add(Stream &stream) { add(&stream); }
+
+  bool begin() override {
+    if (begin_reset) {
+      // Restore working list from master so we start at the first stream again
+      input_streams.clear();
+      for (auto s : all_streams) input_streams.push_back(s);
+    }
+    p_current_stream = nullptr;
+    is_active = true;
+    return true;
+  }
+
+  void end() override {
+    is_active = false;
+    p_current_stream = nullptr;
+  }
+
+  int available() override {
+    if (!is_active) return 0;
+    if (!moveToNextStreamOnEnd()) {
+      return 0;
+    }
+    return availableWithTimeout();
+  }
+
+  size_t readBytes(uint8_t *data, size_t len) override {
+    if (!is_active) return 0;
+    if (!moveToNextStreamOnEnd()) {
+      return 0;
+    }
+    size_t result = p_current_stream->readBytes(data, len);
+    if (result == 0) {
+      // Some stream implementations can return available()>0 even when they
+      // already reached the end and return 0 on readBytes(). In this case we
+      // force the switch to the next stream.
+      if (moveToNextStreamOnEnd(true)) {
+        result = p_current_stream->readBytes(data, len);
+      }
+    }
+    return result;
+  }
+
+  /// Returns true if active and we still have data
+  operator bool() { return is_active && available() > 0; }
+
+  /// Defines the callback which is called when a new stream is started
+  void setOnBeginCallback(void (*callback)(Stream *stream)) {
+    begin_callback = callback;
+  }
+
+  /// Defines the callback which is called when a stream is finished
+  void setOnEndCallback(void (*callback)(Stream *stream)) {
+    end_callback = callback;
+  }
+
+  /// Defines the callback used to determine available bytes for a stream
+  void setAvailableCallback(int (*callback)(Stream *stream)) {
+    available_callback = callback;
+  }
+
+  /// Defines the timout in ms the system waits for data when moving to the next stream
+  void setTimeout(size_t t) { _timeout = t; }
+
+  /// not supported
+  size_t write(const uint8_t *data, size_t size) override { return 0;};
+
+  /// clear
+  void clear() {
+    all_streams.clear();
+    input_streams.clear();
+    p_current_stream = nullptr;
+  }
+
+ protected:
+  Vector<Stream *> all_streams;      // master list — never consumed
+  Vector<Stream *> input_streams;    // working list — consumed by pop_front
+  Stream *p_current_stream = nullptr;
+  bool is_active = false;
+  void (*begin_callback)(Stream *stream) = nullptr;
+  void (*end_callback)(Stream *stream) = nullptr;
+  int (*available_callback)(Stream *stream) = nullptr;
+  bool begin_reset = false;
+
+  /// moves to the next stream if necessary: returns true if we still have a
+  /// valid stream
+  bool moveToNextStreamOnEnd(bool force_next_stream = false) {
+    // keep on running
+    if (!force_next_stream && p_current_stream != nullptr &&
+        streamAvailable(p_current_stream) > 0)
+      return true;
+    // at end?
+    if ((p_current_stream == nullptr || force_next_stream ||
+         availableWithTimeout() == 0)) {
+      if (end_callback && p_current_stream) end_callback(p_current_stream);
+      if (p_current_stream) p_current_stream->flush();
+      if (!input_streams.empty()) {
+        LOGI("using next stream");
+        p_current_stream = input_streams[0];
+        input_streams.pop_front();
+        if (begin_callback && p_current_stream)
+          begin_callback(p_current_stream);
+      } else {
+        p_current_stream = nullptr;
+      }
+    }
+    // returns true if we have a valid stream
+    return p_current_stream != nullptr;
+  }
+
+  int availableWithTimeout() {
+    int result = streamAvailable(p_current_stream);
+    if (result == 0) {
+      for (int j = 0; j < _timeout / 10; j++) {
+        delay(10);
+        result = streamAvailable(p_current_stream);
+        if (result != 0) break;
+      }
+    }
+    return result;
+  }
+
+  int streamAvailable(Stream *stream) {
+    if (stream == nullptr) return 0;
+    return available_callback ? available_callback(stream) : stream->available();
+  }
+};
+
+/**
+ * @brief The Arduino Stream which provides silence and simulates a null device
+ * when used as audio target or audio source
+ * @ingroup io
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+class NullStream : public BaseStream {
+ public:
+  size_t write(const uint8_t *data, size_t len) override { return len; }
+
+  size_t readBytes(uint8_t *data, size_t len) override {
+    memset(data, 0, len);
+    return len;
+  }
+};
+
+
+/**
+ * @brief Stream class which stores the data in a temporary queue buffer.
+ * The queue can be consumed e.g. by a callback function by calling readBytes();
+ * @ingroup io
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+template <class T>
+class QueueStream : public BaseStream {
+ public:
+  /// Empty Constructor: call setBuffer() to set the buffer
+  QueueStream() = default;
+  /// Default constructor
+  QueueStream(int bufferSize, int bufferCount,
+              bool autoRemoveOldestDataIfFull = false) {
+    owns_buffer = true;
+    p_buffer = new NBuffer<T>(bufferSize, bufferCount);
+    remove_oldest_data = autoRemoveOldestDataIfFull;
+  }
+  /// Create stream from any BaseBuffer subclass
+  QueueStream(BaseBuffer<T> &buffer) {
+    setBuffer(buffer);
+  }
+
+  virtual ~QueueStream() {
+    if (owns_buffer) {
+      delete p_buffer;
+    }
+  }
+
+  void setBuffer(BaseBuffer<T> &buffer){
+    owns_buffer = false;
+    p_buffer = &buffer;
+  }
+
+  /// Activates the output
+  virtual bool begin() override {
+    TRACED();
+    total_written = 0;
+    active = true;
+    return true;
+  }
+
+  /// Activate only when filled buffer reached %
+  virtual bool begin(size_t activeWhenPercentFilled) {
+    total_written = 0;
+    // determine total buffer size in bytes
+    size_t size = p_buffer->size() * sizeof(T);
+    // calculate limit
+    active_limit = size * activeWhenPercentFilled / 100;
+    LOGI("activate after: %u bytes",(unsigned)active_limit);
+    return true;
+  }
+
+  /// stops the processing
+  virtual void end() override {
+    TRACED();
+    active = false;
+  };
+
+  int available() override {
+    return active ? p_buffer->available() * sizeof(T) : 0;
+  }
+
+  int availableForWrite() override {
+    if (!active && active_limit > 0) return DEFAULT_BUFFER_SIZE;
+    return p_buffer->availableForWrite() * sizeof(T);
+  }
+
+  virtual size_t write(const uint8_t *data, size_t len) override {
+    if (len == 0) return 0;
+    if (active_limit == 0 && !active) return 0;
+
+    // activate automaticaly when limit has been reached
+    total_written += len;
+    if (!active && active_limit > 0 && total_written >= active_limit) {
+      this->active = true;
+      LOGI("setting active");
+    }
+
+    // make space by deleting oldest entries
+    if (remove_oldest_data) {
+      int available_bytes =
+          p_buffer->availableForWrite() * sizeof(T);
+      if ((int)len > available_bytes) {
+        int gap = len - available_bytes;
+        uint8_t tmp[gap];
+        readBytes(tmp, gap);
+      }
+    }
+
+    return p_buffer->writeArray(data, len / sizeof(T));
+  }
+
+  virtual size_t readBytes(uint8_t *data, size_t len) override {
+    if (!active) return 0;
+    return p_buffer->readArray(data, len / sizeof(T));
+  }
+
+  int read() override {
+    if (!active) return -1;
+    T result;
+    if (!p_buffer->read(result)) {
+      return -1; // no data available
+    }
+    return result;
+  } 
+
+  int peek() override {
+    if (!active) return -1;
+    T result;
+    if (p_buffer->peek(result)) {
+      return *(reinterpret_cast<uint8_t *>(&result));
+    }
+    return -1; // no data available
+  }
+
+  /// Clears the data in the buffer
+  void clear() {
+    if (active) {
+      p_buffer->reset();
+    }
+  }
+
+  /// Returns true if active
+  operator bool() { return active; }
+
+  /// Returns the fill level in percent
+  int levelPercent() {return p_buffer->levelPercent();}
+
+  /// Resize the buffer
+  bool resize(int size) {return p_buffer->resize(size);}
+
+ protected:
+  BaseBuffer<T> *p_buffer;
+  size_t active_limit = 0;
+  size_t total_written = 0;
+  bool active = false;
+  bool remove_oldest_data = false;
+  bool owns_buffer = false;
+};
+
+
+#ifndef SWIG
+
+struct DataNode {
+  size_t len=0;
+  Vector<uint8_t> data{0};
+
+  DataNode() = default;
+  /// Constructor
+  DataNode(void*inData, int len){
+    this->len = len;
+    this->data.resize(len);
+    memcpy(&data[0], inData, len);
+  }
+};
+
+/**
+ * @brief MemoryStream which is written and read using the internal RAM. For each write the data is allocated
+ * on the heap.
+ * @ingroup io
+ * @author Phil Schatzmann
+ * @copyright GPLv3
+ */
+class DynamicMemoryStream : public BaseStream {
+public:
+
+  DynamicMemoryStream() = default;
+
+  DynamicMemoryStream(bool isLoop, int defaultBufferSize=DEFAULT_BUFFER_SIZE, int maxRecords = 0 ) {
+    this->default_buffer_size = defaultBufferSize;
+    is_loop = isLoop;
+    this->max_records = maxRecords;
+  }
+  // Assign values from ref, clearing the original ref
+  void assign(DynamicMemoryStream &ref){
+    audio_list.swap(ref.audio_list);
+    it = ref.it;
+    total_available=ref.total_available;
+    default_buffer_size = ref.default_buffer_size;
+    alloc_failed = ref.alloc_failed;;
+    is_loop = ref.is_loop;
+    ref.clear();
+  }
+
+  /// Intializes the processing
+  virtual bool begin() override {
+    clear();
+    temp_audio.resize(default_buffer_size);
+    return true;
+  }
+
+  virtual void end() override {
+    clear();
+  }
+
+  /// Automatically rewinds to the beginning when reaching the end
+  virtual void setLoop(bool loop){
+    is_loop = loop;
+  }
+
+  /// Enable or disable consuming reads (remove records as they are read)
+  void setConsumeOnRead(bool consume){
+    consume_on_read = consume;
+  }
+
+  void clear() {
+    DataNode *p_node;
+    bool ok;
+    do{
+        ok = audio_list.pop_front(p_node);
+        if (ok){
+          delete p_node;
+        }
+    } while (ok);
+
+    temp_audio.reset();
+    total_available = 0;    
+    read_pos = 0;
+    alloc_failed = false;
+    rewind();
+  }
+
+  size_t size(){
+    return total_available;
+  }
+
+  /// Sets the read position to the beginning
+  void rewind() {
+    it = audio_list.begin();
+    read_pos = 0;
+  }
+
+  virtual size_t write(const uint8_t *data, size_t len) override {
+    int size = audio_list.size();
+    LOGI("write: %d / records: %d (max %d)",(int)len, size ,max_records);
+    DataNode *p_node = new DataNode((void*)data, len);
+    if (p_node->data){
+      alloc_failed = false;
+      total_available += len;
+      audio_list.push_back(p_node);
+
+      // setup interator to point to first record
+      if (it == audio_list.end()){
+        it = audio_list.begin();
+      }
+
+      return len;
+    } 
+    alloc_failed = true;
+    return 0;
+  }
+
+  virtual int availableForWrite() override {
+    // check for max_records
+    if (max_records > 0 && audio_list.size() >= max_records) {
+      return 0;
+    }
+    return alloc_failed ? 0 : default_buffer_size;
+  } 
+
+  virtual int available() override {
+    if (it == audio_list.end()){
+      if (is_loop) rewind();
+      if (it == audio_list.end()) {
+        return 0;
+      }
+    }
+    return (*it)->len;
+  }
+
+  virtual size_t readBytes(uint8_t *data, size_t len) override {
+    // provide unprocessed data
+    if (temp_audio.available() > 0){
+      size_t result = temp_audio.readArray(data, len);
+      read_pos += result;
+      return result;
+    }
+
+    // We have no more data
+    if (it==audio_list.end()){
+      if (is_loop){
+        rewind();
+      } else {
+        // stop the processing
+        return 0;
+      }
+    }
+
+    // provide data from next node
+    DataNode *p_node = *it;
+    size_t node_len = p_node->len;
+    size_t result_len = node_len < len ? node_len : len;
+    if (result_len > 0) {
+      memcpy(data, &p_node->data[0], result_len);
+    }
+    // save unprocessed remainder to temp buffer (to be returned on next call)
+    if (node_len > result_len) {
+      size_t remainder_len = node_len - result_len;
+      temp_audio.resize((int)remainder_len);
+      uint8_t *start = &p_node->data[result_len];
+      temp_audio.writeArray(start, remainder_len);
+    }
+    // advance and optionally consume the node
+    if (consume_on_read) {
+      DataNode* removed = nullptr;
+      bool ok = audio_list.pop_front(removed);
+      if (ok && removed != nullptr) {
+        if (total_available >= removed->len) {
+          total_available -= removed->len;
+        } else {
+          total_available = 0;
+        }
+        delete removed;
+      }
+      it = audio_list.begin();
+    } else {
+      ++it;
+    }
+    read_pos += result_len;
+    return result_len;
+  }
+
+  List<DataNode*> &list() {
+    return audio_list;
+  }
+
+  /// @brief  Post processing after the recording. We add a smooth transition at the beginning and at the end
+  /// @tparam T 
+  /// @param factor 
+  template<typename T>
+  void postProcessSmoothTransition(int channels, float factor = 0.01, int remove=0){
+      if (remove>0){
+        for (int j=0;j<remove;j++){
+          DataNode* node = nullptr;
+          audio_list.pop_front(node);
+          if (node!=nullptr) delete node;
+          node = nullptr;
+          audio_list.pop_back(node);
+          if (node!=nullptr) delete node;
+        }
+      }
+
+      // Remove popping noise
+      SmoothTransition<T> clean_start(channels, true, false, factor);
+      auto first = *list().begin();   
+      if (first!=nullptr){ 
+        clean_start.convert(&(first->data[0]),first->len);
+      }
+
+      SmoothTransition<T> clean_end(channels, false, true, factor);
+      auto last = * (--(list().end()));
+      if (last!=nullptr){
+        clean_end.convert(&(last->data[0]),last->len);  
+      }  
+  }
+
+  /// Returns the current read position
+  size_t getPos() {
+    return read_pos;
+  }
+
+  void setMaxRecords(int max_records){
+    this->max_records = max_records;
+  } 
+
+
+protected:
+  List<DataNode*> audio_list;
+  List<DataNode*>::Iterator it = audio_list.end();
+  size_t total_available = 0;
+  size_t read_pos = 0; 
+  int default_buffer_size=DEFAULT_BUFFER_SIZE;
+  int max_records = 0;
+  bool alloc_failed = false;
+  RingBuffer<uint8_t> temp_audio{0};
+  bool is_loop = false;
+  bool consume_on_read = false;
+
+};
+
+#endif
+
+}  // namespace audio_tools

@@ -1,0 +1,2672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-3-typeahead/4.0.2/bootstrap3-typeahead.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="user-scalable=no, initial-scale=1, maximum-scale=1, minimum-scale=1, width=device-width">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <link rel="icon" href="favicon.png" type="image/png">
+  <title>Departures Board</title>
+  <script>
+    (() => {
+      const themeMatcher = window.matchMedia('(prefers-color-scheme: dark)');
+      const applyTheme = () => { document.documentElement.setAttribute('data-bs-theme', themeMatcher.matches ? 'dark' : 'light'); };
+      applyTheme();
+      themeMatcher.addEventListener('change', applyTheme);
+    })();
+  </script>
+</head>
+<style>
+  :root {--bs-body-font-size: 0.875rem;}
+  .btn {--bs-btn-font-size: 0.875rem;}
+  .btn-outline-secondary {font-size: 1rem;}
+  .form-control, .form-select {font-size: var(--bs-body-font-size);}
+  .floating-footer {position:fixed;bottom:0;left:0;width:100%;background-color:var(--bs-body-bg);z-index:1030;}
+  .floating-footer .footer-inner {width:min(90%, 500px);margin:0 auto;padding:10px;border-top:1px solid var(--bs-border-color);text-align:center;}
+  .inline-row {white-space:nowrap;margin-top:-5px;}
+  .inline-row label {display:inline-block;margin-right:8px;font-weight:normal;}
+  .inline-row .form-control, .inline-row .form-select {display:inline-block;width:auto;}
+  .form-label, .form-check-label {font-weight:500;}
+  .custom-tabs {overflow:hidden;}
+  .custom-tabs .nav-tabs {border-bottom-style:none;}
+  .custom-tabs .nav-link {color:var(--bs-gray-500);border:none;background-color:#0579d4;padding:8px 18px;}
+  .custom-tabs .nav-link.active {background-color:var(--bs-secondary-bg);}
+  .custom-tabs .tab-content {padding:8px;background-color:var(--bs-secondary-bg);border-radius:0 15px 15px;}
+  .custom-tabs .form-range::-webkit-slider-runnable-track {background-color:var(--bs-gray-500);}
+  .custom-tabs .form-range::-moz-range-track {background-color:var(--bs-gray-500);}
+  .tab-text-short {display:none;}
+  .tab-text {display:inline;}
+  @media (max-width: 480px) {
+    .tab-text-short {display:inline;}
+    .tab-text {display:none;}
+  }
+  @media (hover: none) {  /* iOS sticky hover fix */
+    #scheduleTab .btn-outline-secondary:hover {background-color:transparent!important;color:var(--bs-btn-color)!important;border-color:var(--bs-btn-border-color)!important;}
+    #scheduleTab .btn-danger:hover {background-color:var(--bs-btn-bg)!important;border-color:var(--bs-btn-border-color)!important;}
+  }
+</style>
+<body style="padding-bottom:60px;">
+  <div style="width:min(90%,500px);margin:0 auto;padding:0 5px;">
+    <form id="formsettings">
+      <fieldset>
+        <legend style="position:relative;text-align:center;min-height:45px;padding-top:8px;">
+          <div id="nrT" style="display:none">Rail Departures Board</div>
+          <div id="tflT" style="display:none">Tube Arrivals Board</div>
+          <div id="busT" style="display:none">Bus Departures Board</div>
+          <div class="dropdown" style="position:absolute;top:5px;right:0;">
+            <button class="btn dropdown-toggle" type="button" id="menuButton" data-bs-toggle="dropdown" aria-expanded="false">&#9776;</button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="menuButton">
+              <li><a class="dropdown-item" href="#" onclick="handleCheckUpdates()">Check for Updates</a></li>
+              <li><a class="dropdown-item" href="/keys.htm">Edit API Keys</a></li>
+              <li><a class="dropdown-item" href="/editrss.htm">Edit RSS Feeds</a></li>
+              <li><a class="dropdown-item" href="#" onclick="handleClearWifi()">Clear WiFi Settings</a></li>
+              <li><a class="dropdown-item" href="#" onclick="handleRestartSystem()">Restart System</a></li>
+            </ul>
+          </div>
+        </legend>
+
+        <div class="mb-3" id="modeSelector">
+          <label class="form-label">Board Mode</label>
+          <div class="btn-group w-100" role="group">
+            <input type="radio" class="btn-check" name="boardmode" id="modeRail" value="0" autocomplete="off">
+            <label class="btn btn-outline-secondary d-flex align-items-center justify-content-center" for="modeRail"><img src="/irail.webp" class="me-2" alt=""> Rail</label>
+            <input type="radio" class="btn-check" name="boardmode" id="modeTube" value="1" autocomplete="off">
+            <label class="btn btn-outline-secondary d-flex align-items-center justify-content-center" for="modeTube"><img src="/itube.webp" class="me-2" alt=""> Tube</label>
+            <input type="radio" class="btn-check" name="boardmode" id="modeBus" value="2" autocomplete="off">
+            <label class="btn btn-outline-secondary d-flex align-items-center justify-content-center" for="modeBus"><img src="/ibus.webp" class="me-2" alt=""> Bus</label>
+          </div>
+        </div>
+
+        <div class="mb-3" id="nrSearchBox" style="display:none">
+          <label class="form-label" for="searchName">Station</label>
+          <input id="searchName" type="text" placeholder="Type the station name" class="form-control typeahead">
+        </div>
+
+        <div class="mb-3" id="nrCallingBox" style="display:none">
+          <label class="form-label" for="callingStation">Only show services calling at</label>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;">
+              <input id="callingStation" type="text" placeholder="Station name or leave blank for all services"
+                class="form-control typeahead" style="width:100%;">
+            </div>
+            <div style="flex-shrink:0;">
+              <button id="clearFilter" name="clearFilter" class="btn btn-secondary" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="platformFilterBox" style="margin-top:10px;">
+            <label class="form-label" for="platformFilter">Only show these platforms</label>
+            <input id="platformFilter" type="text" maxlength="24"
+              placeholder="Enter comma separated platform numbers or blank for all" class="form-control">
+          </div>
+        </div>
+
+        <div id="nrInvalidToken" style="display:none;">
+          <div class="alert alert-danger d-flex align-items-center mb-3" role="alert">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2" viewBox="0 0 16 16" role="img" aria-label="Warning:">
+              <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+            </svg>
+            <div>
+              You must enter a valid National Rail or Rail Data API token to use Rail Departures mode. Manage your API keys <a href="/keys.htm" class="alert-link">here</a>.
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-3" id="tflSearchBox" style="display:none">
+          <label class="form-label" for="searchNameTfL">Underground Station</label>
+          <input id="searchNameTfL" type="text" placeholder="Type the underground station name"
+            class="form-control typeahead">
+
+          <div id="tflLineFilterBox" class="mt-2" style="display:none">
+            <label class="form-label" for="tubeLineFilter">Filter by Line</label>
+            <select id="tubeLineFilter" class="form-select"></select>
+          </div>
+
+          <div id="tflDirectionFilterBox" class="mt-2" style="display:none">
+            <label class="form-label" for="tubeDirectionFilter">Filter by Direction</label>
+            <select id="tubeDirectionFilter" class="form-select">
+              <option value="">Any direction</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mb-3" id="busAtcoBox" style="display:none">
+          <label class="form-label" for="busAtco">Bus Stop ATCO code</label>
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;">
+              <input id="busAtco" type="text" placeholder="Enter the ATCO code and press verify" class="form-control"
+                style="width:100%;">
+            </div>
+            <div style="flex-shrink:0;">
+              <button id="verifyAtco" name="verifyAtco" class="btn btn-secondary" type="button" disabled>Verify</button>
+            </div>
+          </div>
+          <div class="form-text" id="busAtcoLongName"></div>
+
+          <div id="busFilterBox" class="mb-3 mt-2" style="display:none">
+            <label class="form-label" for="busFilter">Only show these Bus services</label>
+            <input id="busFilter" type="text" maxlength="24"
+              placeholder="Enter comma separated service numbers or blank for all" class="form-control">
+          </div>
+
+          <div id="busAtcoHistory" class="mb-3 mt-2" style="display:none">
+            <label class="form-label" for="busAtcoHistoryList">Recently verified ATCO codes</label>
+            <div style="display:flex;gap:10px;">
+              <div style="flex:1;">
+                <select id="busAtcoHistoryList" class="form-select">
+                </select>
+              </div>
+              <div style="flex-shrink:0;">
+                <button id="clearHistory" name="clearHistory" class="btn btn-secondary" type="button">Clear
+                  History</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="container mt-4 px-0">
+            <div class="ratio ratio-1x1">
+              <iframe id="bustimesMap" src="https://bustimes.org/map" title="Bus Times Map"
+                allow="geolocation"></iframe>
+            </div>
+          </div>
+
+          <div>
+            <div class="form-text">Find bus stop ATCO codes at <a href="https://bustimes.org/search"
+                target="_blank">bustimes.org</a>. Tap <a
+                href="https://github.com/gadec-uk/matrix-departures-board/#bus-stop-atco-codes" target="_blank">here</a> for
+              full instructions.</div>
+          </div>
+        </div>
+
+        <div class="mb-3" id="scheduleActionButtons" style="padding-top:15px;">
+          <div style="display:flex;gap:10px;">
+            <button id="btnAddToScheduler" class="btn btn-primary" type="button" style="flex:1;">Add to Scheduler</button>
+            <button id="btnAddToCarousel" class="btn btn-primary" type="button" style="flex:1;">Add to Carousel</button>
+          </div>
+        </div>
+
+        <div class="custom-tabs">
+          <ul class="nav nav-tabs" style="margin-top:20px;font-weight:bold;" id="optTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="options-tab" data-bs-toggle="tab" data-bs-target="#optionsTab"
+                type="button" role="tab" aria-controls="optionsTab" aria-selected="true">Options</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="schedule-tab" data-bs-toggle="tab" data-bs-target="#scheduleTab" type="button"
+                role="tab" aria-controls="scheduleTab" aria-selected="false">Schedule</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="colours-tab" data-bs-toggle="tab" data-bs-target="#coloursTab" type="button"
+                role="tab" aria-controls="coloursTab" aria-selected="false">Theme</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advancedTab" type="button" role="tab" aria-controls="advancedTab" aria-selected="false">
+                <span class="tab-text">Advanced</span>
+                <span class="tab-text-short">Adv</span>
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content" style="padding-top:20px;">
+            <div class="tab-pane fade show active" id="optionsTab" role="tabpanel" aria-labelledby="options-tab">
+              <div class="mb-3">
+                <label class="form-label" for="brightness">Brightness</label>
+                <input type="range" min="1" max="255" value="50" class="form-range" id="brightness">
+                <div class="form-text">Lowering the brightness will prolong panel life.</div>
+              </div>
+
+              <div class="mb-3">
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="showLocation">Show current location name</label>
+                      <div class="small text-body-secondary">Displays station/bus stop name after the clock</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="showLocation" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="enableWeather">Show current weather at station/bus stop</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableWeather" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optBuses" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="enableBuses">Include bus replacement services</label>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="enableBuses" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowServiceMsgs" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="showServiceMsgs">Show station messages</label>
+                        <div class="small text-body-secondary">Displays station &amp; service status messages</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showServiceMsgs" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowPlatform" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="showPlatform">Show platform numbers (if available)</label>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showPlatform" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowOrdinals" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="showOrdinals">Show service ordinal numbers</label>
+                        <div class="small text-body-secondary">Displays 2nd, 3rd, 4th etc. next to service time</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showOrdinals" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowLastSeen" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="showLastSeen">Show service last seen location</label>
+                        <div class="small text-body-secondary">Adds last reported location to the Calling at list</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showLastSeen" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowTubeLocation" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="showTubeLocation">Show service current location</label>
+                        <div class="small text-body-secondary">Displays the location of the primary tube services</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showTubeLocation" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowFullCalling" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="showFullCalling">Wait for Calling at list to complete</label>
+                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                          title="Waits for the Calling at service list to complete scrolling before changing the primary service on the board. Enable this for busy stations if you want to see the full calling at list for a service."
+                          style="cursor:pointer;"></i>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showFullCalling" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowFullMsgs" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="showFullMsgs">Wait for Messages or RSS to complete</label>
+                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                          title="Waits for the current service message or RSS headline feed to complete scrolling before changing the primary service on the board. Useful for busy stations with frequently changing services."
+                          style="cursor:pointer;"></i>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showFullMsgs" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optShowClockNoServices" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="showClockNoServices">Full screen clock if no train services</label>
+                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                          title="Displays the full screen Network SouthEast style station clock if no services are available at the selected station."
+                          style="cursor:pointer;"></i>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showClockNoServices" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-inline-block" for="enableAudio">Enable audio announcements</label>
+                      <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                          title="An SD card with at least one speech-pack installed must be present to enable this option."
+                          style="cursor:pointer;"></i>
+                      <div class="small text-body-secondary">Station announcements for National Rail and Tube</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableAudio" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optAudio" style="display:none;">
+
+                  <hr class="mt-0 mb-2 opacity-10">
+                  <div class="d-flex align-items-center">
+                    <label class="form-label mb-0" for="announcerVoice">Announcer voice:</label>
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Select the voice to be used for all audio announcements. An SD card with valid speech-pack audio files must be present."
+                      style="cursor:pointer;"></i>
+                    <select id="announcerVoice" class="form-select ms-auto w-auto">
+                    </select>
+                  </div>
+
+                  <hr class="mt-2 mb-0 opacity-10">
+                  <div class="py-3">
+                    <label class="form-label" for="volume">Audio volume</label>
+                    <input type="range" min="1" max="191" value="70" class="form-range" id="volume">
+                    <div class="form-text">Set the volume level for audio announcements.</div>
+                  </div>
+
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="enableReverb">Enable station reverb effect</label>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="enableReverb" role="switch">
+                      </div>
+                    </div>
+                  </div>
+
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="enableAudioCalling">Enable "calling at" announcements</label>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="enableAudioCalling" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="enableFirmware">Automatic firmware updates at
+                        startup</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableFirmware" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="enableFirmwareDaily">Daily check for firmware
+                        updates</label>
+                      <div class="small text-body-secondary">Install updates around midnight if powered on</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableFirmwareDaily" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="enableSleep">Overnight sleep mode (screensaver)</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableSleep" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div id="sleepTimeSelectors" style="display:none">
+                  <div style="display:flex;gap:10px;">
+                    <div style="flex:1;">
+                      <label class="form-label" for="sleepStart">Sleep start hour</label>
+                      <select id="sleepStart" class="form-select">
+                      </select>
+                    </div>
+                    <div style="flex:1;">
+                      <label class="form-label" for="sleepEnd">Sleep end hour</label>
+                      <select id="sleepEnd" class="form-select">
+                      </select>
+                    </div>
+                  </div>
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="sleepUseBigClock">Full screen clock during sleep mode</label>
+                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                        title="Displays the full screen Network SouthEast style station clock during sleep mode. Note: using this option will be less effective at preventing screen burn."
+                        style="cursor:pointer;"></i>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="sleepUseBigClock" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <hr class="my-1 opacity-10">
+
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="scheduleTab" role="tabpanel" aria-labelledby="schedule-tab">
+
+              <div class="mb-3">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <label class="form-check-label d-block fw-bold" for="enableScheduler">Enable scheduler</label>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableScheduler" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <label class="form-label">Scheduler list (maximum 5 entries)</label>
+                <div id="schedulerListContainer" class="list-group mb-3"></div>
+
+                <div class="py-2">
+                  <hr class="mt-0 mb-3 opacity-10">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <label class="form-check-label d-block fw-bold" for="enableCarousel">Enable carousel</label>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableCarousel" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <label class="form-label">Carousel list (maximum 5 entries)</label>
+                <div id="carouselListContainer" class="list-group"></div>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="coloursTab" role="tabpanel" aria-labelledby="colours-tab">
+              <div class="mb-3">
+                <label class="form-label" for="themeSelector">Current theme</label>
+                <select id="themeSelector" class="form-select mb-3"></select>
+
+                <div class="d-flex gap-2 mb-3">
+                  <button id="btnSaveExistingTheme" type="button" class="btn btn-success flex-fill" style="display:none;">Save</button>
+                  <button id="btnSaveTheme" type="button" class="btn btn-primary flex-fill">Save As...</button>
+                  <button id="btnDeleteTheme" type="button" class="btn btn-danger flex-fill" style="display:none;">Delete</button>
+                </div>
+
+                <label class="form-label d-block border-bottom pb-2 mb-2">Theme colours</label>
+                <div id="colourItemsContainer" class="list-group">
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-pane fade" id="advancedTab" role="tabpanel" aria-labelledby="advanced-tab">
+              <div class="mb-3" style="margin-bottom:0;">
+
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-inline-block" for="optTouch">Enable touch sensor</label>
+                      <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                        title="A tap switches between configured modes (or wakes from sleep mode). If the carousel or scheduler mode is active, a tap switches to the next location immediately."
+                        style="cursor:pointer;"></i>
+                      <div class="small text-body-secondary">Requires an installed TTP223 sensor or button</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="optTouch" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optStayAwake" class="mb-3" style="display:none;">
+                  <hr class="my-3 opacity-10">
+                  <div class="d-flex align-items-center">
+                    <label class="form-label mb-0" for="forceWakeTime">Wake from sleep by touch for:</label>
+                    <select id="forceWakeTime" class="form-select ms-auto w-auto">
+                      <option value="60">1 minute</option>
+                      <option value="300">5 minutes</option>
+                      <option value="600">10 minutes</option>
+                      <option value="900">15 minutes</option>
+                      <option value="1800">30 minutes</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="optLongPressClock" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="longPressClock">Long press displays full screen clock</label>
+                        <div class="small text-body-secondary">Short tap to hide the clock again</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="longPressClock" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="optFlip">Flip the display 180&deg;</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="optFlip" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="swapBG">Swap blue/green pixel order</label>
+                      <div class="small text-body-secondary">Enable this if colours are displayed incorrectly</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="swapBG" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="mx6126">Enable support for FM6126A driver</label>
+                      <div class="small text-body-secondary">Enable only if your panel uses FM6126A chips</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="mx6126" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="enableFTP">Enable internal FTP server</label>
+                      <div class="small text-body-secondary">Allows SD card file management via FTP</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="enableFTP" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-3">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="optHost">Set custom hostname for board</label>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="optHost" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-2" id="customHostbox" style="display:none;">
+                  <input id="customHost" type="text" maxlength="32"
+                    placeholder="Enter the hostname or leave blank for the default" class="form-control">
+                  <div class="form-text">Enter the new hostname for this board (letters, numbers, hyphens only).</div>
+                </div>
+
+                <hr class="my-0 opacity-10">
+                <div class="py-2">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <label class="form-check-label d-block" for="optTZ">Set custom (non-UK) time zone</label>
+                      <div class="small text-body-secondary">Only changes the time zone of the clock display</div>
+                    </div>
+                    <div class="form-check form-switch mb-0">
+                      <input class="form-check-input" type="checkbox" id="optTZ" role="switch">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-2" id="customTZbox" style="display:none;">
+                  <input id="customTZ" type="text" maxlength="24"
+                    placeholder="Enter the POSIX time zone string or leave blank for UK" class="form-control">
+                  <div class="form-text">Enter the exact POSIX time zone. Tap <a
+                      href="https://github.com/gadec-uk/matrix-departures-board/#custom-time-zones" target="_blank">here</a> for
+                    help.</div>
+                </div>
+
+                <div id="optNoScroll" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="noScrolling">Suppress calling at / info
+                          messages</label>
+                        <div class="small text-body-secondary">Turns off all horizontal scrolling and RSS feeds</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="noScrolling" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optFastRefresh" style="display:none">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="enableFastRefresh">Increase Rail API refresh rate</label>
+                        <div class="small text-body-secondary">Increases from every 60 secs to 35 secs</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="enableFastRefresh" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optRssFeed" style="display:none;">
+                  <hr class="mt-0 mb-2 opacity-10">
+                  <label class="form-label" for="rssFeedList">Display RSS news headlines feed from:</label>
+                  <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                    title="The top 5 news headlines from the selected feed will be shown after any other service messages."
+                    style="cursor:pointer;"></i>
+                  <select id="rssFeedList" class="form-select"></select>
+                  <div class="small text-body-secondary mb-2">Tap <a href="/editrss.htm">here</a> to open the RSS feeds editor</div>
+
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-block" for="rssPriority">Prioritise RSS headlines feed</label>
+                        <div class="small text-body-secondary">Displays headlines before service messages</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="rssPriority" role="switch">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="optNrTimeOffset" class="mb-3" style="display:none;">
+                  <hr class="mt-0 mb-3 opacity-10">
+                  <div class="d-flex align-items-center">
+                    <label class="form-label mb-0" for="nrTimeOffset">Offset departures by:</label>
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Useful if you want display departures further into the future (or the past). Does not affect the clock display."
+                      style="cursor:pointer;"></i>
+                    <select id="nrTimeOffset" class="form-select ms-auto w-auto">
+                    </select>
+                  </div>
+                </div>
+
+                <div id="optDataSource" class="mb-3" style="display:none;">
+                  <hr class="mt-0 mb-3 opacity-10">
+                  <div class="d-flex align-items-center">
+                    <label class="form-label mb-0" for="dataSource">Rail data source:</label>
+                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                      title="Select the data source for Rail information. Only sources with API keys configured are shown. Rail Delivery Group is recommended."
+                      style="cursor:pointer;"></i>
+                    <select id="dataSource" class="form-select ms-auto w-auto">
+                    </select>
+                  </div>
+                </div>
+
+                <hr class="my-2 opacity-10">
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-3" style="padding-top:15px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="flex:1;text-align:left;">
+              <div class="form-text" id="fwinfo" style="margin:0;"></div>
+            </div>
+            <div id="nrAtt" style="display:none">
+              <a href="https://www.nationalrail.co.uk" target="_blank"><img src="/nrelogo.webp" alt="National Rail"
+                  style="max-height:40px;"></a>
+            </div>
+            <div id="rdgAtt" style="display:none">
+              <a href="https://www.raildeliverygroup.com" target="_blank"><img src="/rdglogo.webp" alt="Rail Delivery Group"
+                  style="max-height:40px;"></a>
+            </div>
+            <div id="tflAtt" style="display:none">
+              <a href="https://tfl.gov.uk/" target="_blank"><img src="/tfllogo.webp" alt="TfL"
+                  style="max-height:40px;"></a>
+            </div>
+            <div id="btAtt" style="display:none">
+              <a href="https://bustimes.org/" target="_blank"><img src="/btlogo.webp" alt="Bustimes"
+                  style="max-height:40px;"></a>
+            </div>
+          </div>
+          <hr style="margin:10px 0;">
+          <div class="form-text text-center">&copy; 2026 Gadec Software. This work is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">Creative Commons Attribution-NonCommercial-ShareAlike 4.0</a>. Any commercial use of this work, including reselling in kit or assembled form, is prohibited.</div>
+        </div>
+
+        <div class="floating-footer">
+          <div class="footer-inner">
+            <button id="save" name="save" class="btn btn-primary" type="submit">Save Settings</button>
+          </div>
+        </div>
+      </fieldset>
+    </form>
+  </div>
+
+  <div class="modal fade" id="timePromptModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Time of Day</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label">Select time for this schedule item:</label>
+          <div style="display:flex;gap:10px;">
+            <select id="scheduleHour" class="form-select">
+              </select>
+            <span style="font-size:1.5rem;">:</span>
+            <select id="scheduleMinute" class="form-select">
+              </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmTime">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="carouselDurationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Carousel Duration</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <label for="carouselDuration" class="form-label">Show this location for:</label>
+          <select id="carouselDuration" class="form-select"><option value="3">3 minutes</option>
+            </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmCarousel">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Theme Modal -->
+  <div class="modal fade" id="saveThemeModal" tabindex="-1" aria-labelledby="saveThemeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="saveThemeModalLabel">Save Theme As</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label for="themeNameInput" class="form-label">Theme Name</label>
+            <input type="text" class="form-control" id="themeNameInput" maxlength="32" placeholder="e.g. Cyberpunk" autocomplete="off">
+            <div class="form-text">Max 32 characters (letters, numbers, spaces, underscores).</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmSaveTheme">Save Theme</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const appState = {
+      stationSelected: false,
+      stationSelectedTfL: false,
+      stationName: "",
+      stationCRS: "",
+      stationLatitude: 0,
+      stationLongitude: 0,
+      platformFilter: "",
+      platformFilterOK: true,
+      nrTimeOffset: 0,
+      tubeName: "",
+      tubeId: "",
+      tubeLineId: "all",
+      tubeDirection: "",
+      tubeLat: 0,
+      tubeLon: 0,
+      busName: "",
+      busId: "",
+      busLat: 0,
+      busLon: 0,
+      busIdOK: false,
+      busFilter: "",
+      busFilterOK: true,
+      boardMode: 0, //0=Rail, 1=Tube, 2=Bus
+      appKey: "",
+      callingStationSelected: false,
+      callingStation: "",
+      callingCrs: "",
+      tzOK: true,
+      hostnameOK: true,
+      validNatRailToken: true,
+      validRdgRailToken: true,
+      validRdgServiceToken: true,
+      dataSource: 0,
+      firmwareVersion: "",
+      prevFirmwareVersion: "",
+      scheduler: [],
+      carousel: [],
+      jsonSettings: {},
+      atcoHistory: [],
+      rssFeeds: [],
+      voices: [],
+      jsonPrevFirmware: {},
+      availableThemes: [],
+      currentThemeData: [],
+      activeThemeFile: ""
+    };
+
+    const elements = {
+      form: document.getElementById("formsettings"),
+      searchName: document.getElementById("searchName"),
+      searchNameTfL: document.getElementById("searchNameTfL"),
+      tubeLineFilterBox: document.getElementById("tflLineFilterBox"),
+      tubeLineFilter: document.getElementById("tubeLineFilter"),
+      tubeDirectionFilterBox: document.getElementById("tflDirectionFilterBox"),
+      tubeDirectionFilter: document.getElementById("tubeDirectionFilter"),
+      callingStation: document.getElementById("callingStation"),
+      platformFilter: document.getElementById("platformFilter"),
+      brightness: document.getElementById("brightness"),
+      volume: document.getElementById("volume"),
+      enableAudio: document.getElementById("enableAudio"),
+      enableSleep: document.getElementById("enableSleep"),
+      sleepStart: document.getElementById("sleepStart"),
+      sleepEnd: document.getElementById("sleepEnd"),
+      saveButton: document.getElementById("save"),
+      clearButton: document.getElementById("clearFilter"),
+      fwinfo: document.getElementById("fwinfo"),
+      verifyAtcoButton: document.getElementById("verifyAtco"),
+      busAtco: document.getElementById("busAtco"),
+      busLongName: document.getElementById("busAtcoLongName"),
+      busFilter: document.getElementById("busFilter"),
+      clearHistoryButton: document.getElementById("clearHistory"),
+      busAtcoHistoryList: document.getElementById("busAtcoHistoryList"),
+      optTouch: document.getElementById("optTouch"),
+      forceWakeTime: document.getElementById("forceWakeTime"),
+      optTZ: document.getElementById("optTZ"),
+      customTZ: document.getElementById("customTZ"),
+      optHost: document.getElementById("optHost"),
+      customHost: document.getElementById("customHost"),
+      nrTimeOffset: document.getElementById("nrTimeOffset"),
+      rssFeedList: document.getElementById("rssFeedList"),
+      dataSource: document.getElementById("dataSource"),
+      scheduleActionButtons: document.getElementById("scheduleActionButtons"),
+      btnAddToScheduler: document.getElementById("btnAddToScheduler"),
+      btnAddToCarousel: document.getElementById("btnAddToCarousel"),
+      schedulerListContainer: document.getElementById("schedulerListContainer"),
+      carouselListContainer: document.getElementById("carouselListContainer"),
+      enableScheduler: document.getElementById('enableScheduler'),
+      enableCarousel: document.getElementById('enableCarousel'),
+      announcerVoice: document.getElementById('announcerVoice')
+    };
+
+    document.getElementById('formsettings').addEventListener('keydown', function(e) { if (e.key === 'Enter') e.preventDefault(); });
+
+    const busFilterError="Please enter a valid list of bus services to filter on, or leave blank for all services.";
+    const platformFilterError="Please enter a valid list of platforms to filter on, or leave blank for all services.";
+    const tzError="Please enter a valid POSIX format timezone string or uncheck the \"Custom timezone\" option to use UK time.";
+    const hostnameError="Please enter a valid hostname or uncheck the \"Custom hostname\" option to use the default \"DeparturesBoard\".";
+    const MAX_BUS_ATCOS=10;
+    const sysErr="System Error";
+    const sysName="Departures Board"
+    const githubRepo="https://api.github.com/repos/gadec-uk/matrix-departures-board/releases/latest"
+
+    const lineDirectionMap = {
+      "bakerloo": {inbound:"Southbound",outbound:"Northbound"},
+      "central": {inbound:"Westbound",outbound:"Eastbound"},
+      "circle": {inbound:"Anti-Clockwise",outbound:"Clockwise"},
+      "district": {inbound:"Westbound",outbound:"Eastbound"},
+      "hammersmith-city": {inbound:"Westbound",outbound:"Eastbound"},
+      "jubilee": {inbound:"Northbound",outbound:"Southbound"},
+      "metropolitan": {inbound:"Northbound",outbound:"Southbound"},
+      "northern": {inbound:"Southbound",outbound:"Northbound"},
+      "piccadilly": {inbound:"Westbound",outbound:"Eastbound"},
+      "victoria": {inbound:"Southbound",outbound:"Northbound"},
+      "waterloo-city": {inbound:"Westbound",outbound:"Eastbound"}
+    };
+
+    function updateDirectionLabels(lineId) {
+      const map = lineDirectionMap[lineId];
+      const optInbound = document.querySelector('#tubeDirectionFilter option[value="inbound"]');
+      const optOutbound = document.querySelector('#tubeDirectionFilter option[value="outbound"]');
+
+      if (optInbound) {
+        optInbound.textContent = map ? map.inbound : "Inbound";
+      }
+      if (optOutbound) {
+        optOutbound.textContent = map ? map.outbound : "Outbound";
+      }
+    }
+
+    function populateHoursSelect(selectId) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      select.innerHTML = "";
+      for (let hour = 0; hour < 24; hour++) {
+        const option = document.createElement("option");
+        option.value = hour;
+        option.textContent = String(hour).padStart(2, "0") + ":00";
+        select.appendChild(option);
+      }
+    }
+
+    function populateOffsetTime(selectId) {
+      const select = document.getElementById(selectId);
+      for (let mins = -60; mins <= 120; mins++) {
+        if (mins % 15 === 0 || (mins >= 1 && mins <= 5)) {
+          const option = document.createElement("option");
+          const actualValue = (mins === 120) ? 119 : mins;
+          option.value = actualValue;
+          option.textContent = (actualValue === 0)
+            ? "none (default)"
+            : `${actualValue} minute${Math.abs(actualValue) === 1 ? '' : 's'}`;
+          select.appendChild(option);
+        }
+      }
+    }
+
+    function populateSchedulerTimes() {
+      const hrSelect = document.getElementById('scheduleHour');
+      const mnSelect = document.getElementById('scheduleMinute');
+      for (let i = 0; i < 24; i++) {
+          let opt = document.createElement('option');
+          opt.value = opt.text = i.toString().padStart(2, '0');
+          if(hrSelect) hrSelect.add(opt);
+      }
+      for (let i = 0; i < 60; i++) {
+          let opt = document.createElement('option');
+          opt.value = opt.text = i.toString().padStart(2, '0');
+          if(mnSelect) mnSelect.add(opt);
+      }
+    }
+
+    function populateCarouselTimes() {
+      const durationSelect = document.getElementById('carouselDuration');
+      for (let i = 5; i <= 60; i += 5) {
+          const opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = `${i} minutes`;
+          durationSelect.appendChild(opt);
+      }
+    }
+
+    populateSchedulerTimes();
+    populateCarouselTimes();
+    populateHoursSelect("sleepStart");
+    populateHoursSelect("sleepEnd");
+    populateOffsetTime("nrTimeOffset");
+
+    function rgb565ToHex(rgb565Str) {
+      const val = parseInt(rgb565Str, 16);
+      let r = (val >> 11) & 0x1F;
+      let g = (val >> 5) & 0x3F;
+      let b = val & 0x1F;
+      r = Math.round((r * 255) / 31);
+      g = Math.round((g * 255) / 63);
+      b = Math.round((b * 255) / 31);
+      return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+    }
+
+    function hexToRgb565(hexStr) {
+      let r = parseInt(hexStr.substring(1, 3), 16);
+      let g = parseInt(hexStr.substring(3, 5), 16);
+      let b = parseInt(hexStr.substring(5, 7), 16);
+      r = Math.round((r * 31) / 255);
+      g = Math.round((g * 63) / 255);
+      b = Math.round((b * 31) / 255);
+      return ((r << 11) | (g << 5) | b).toString(16).toUpperCase().padStart(4, '0');
+    }
+
+    async function fetchThemes() {
+      try {
+        const response = await fetch('/getthemes');
+        if (!response.ok) return;
+        appState.availableThemes = await response.json();
+        renderThemeSelector();
+      } catch (err) {
+        console.error("Error fetching themes:", err);
+      }
+    }
+
+    function renderThemeSelector() {
+      const selector = document.getElementById("themeSelector");
+      selector.innerHTML = "";
+
+      // Try to find the saved theme in config, otherwise default to "ct_default"
+      let selectedFile = appState.jsonSettings.theme || "ct_default";
+
+      // Verify the selected theme still exists in the list
+      const themeExists = appState.availableThemes.some(t => t.file === selectedFile);
+      if (!themeExists) selectedFile = "ct_default";
+
+      appState.activeThemeFile = selectedFile;
+      appState.jsonSettings.theme = selectedFile; // Keep config up to date
+
+      appState.availableThemes.forEach(theme => {
+        const option = document.createElement("option");
+        option.value = theme.file;
+        option.textContent = theme.name;
+        if (theme.file === selectedFile) option.selected = true;
+        selector.appendChild(option);
+      });
+
+      updateThemeButtons();
+      loadThemeData(selectedFile);
+    }
+
+    function updateThemeButtons() {
+      const currentTheme = appState.availableThemes.find(t => t.file === appState.activeThemeFile);
+      if (currentTheme && currentTheme.user) {
+        document.getElementById("btnSaveExistingTheme").style.display = "block";
+        document.getElementById("btnDeleteTheme").style.display = "block";
+      } else {
+        document.getElementById("btnSaveExistingTheme").style.display = "none";
+        document.getElementById("btnDeleteTheme").style.display = "none";
+      }
+    }
+
+    async function loadThemeData(filename) {
+      try {
+        const response = await fetch(`/${filename}.json`);
+        if (!response.ok) throw new Error("Failed to load theme data");
+        const data = await response.json();
+
+        // Sort items numerically by ID ascending
+        appState.currentThemeData = data.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+
+        renderThemeColours();
+      } catch (err) {
+        console.error("Error loading theme json:", err);
+      }
+    }
+
+    function renderThemeColours() {
+      const container = document.getElementById("colourItemsContainer");
+      container.innerHTML = "";
+
+      appState.currentThemeData.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "list-group-item d-flex justify-content-between align-items-center";
+
+        const label = document.createElement("span");
+        label.textContent = item.name;
+
+        const colourInput = document.createElement("input");
+        colourInput.type = "color";
+        colourInput.className = "form-control form-control-color";
+        colourInput.value = rgb565ToHex(item.colour);
+        colourInput.title = "Choose your colour";
+
+        // Direct mutation preserves item.id and item.name automatically
+        colourInput.addEventListener("change", (e) => {
+          item.colour = hexToRgb565(e.target.value);
+        });
+
+        div.appendChild(label);
+        div.appendChild(colourInput);
+        container.appendChild(div);
+      });
+    }
+
+    function enableSave(isAllowed) {
+      elements.saveButton.disabled = !isAllowed;
+      elements.btnAddToCarousel.disabled = !(isAllowed && appState.carousel.length<5);
+      elements.btnAddToScheduler.disabled = !(isAllowed && appState.scheduler.length<5);
+    }
+
+    async function fetchRssFeeds() {
+      try {
+        const response = await fetch('/rss.json');
+        if (!response.ok) {
+          return;
+        }
+        appState.rssFeeds = await response.json();
+        renderRssFeeds();
+      } catch {
+        return;
+      }
+    }
+
+    function renderRssFeeds() {
+      const list = appState.rssFeeds;
+
+      const datalist = document.getElementById("rssFeedList");
+      datalist.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "None (no headlines)";
+      datalist.appendChild(option);
+
+      list.forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.url;
+        option.textContent = item.name;
+        datalist.appendChild(option);
+      });
+    }
+
+    async function fetchAtcoHistory() {
+      try {
+        const response = await fetch('/atco-history.json');
+        if (!response.ok) {
+          return;
+        }
+        appState.atcoHistory = await response.json();
+        renderAtcoHistory();
+      } catch {
+        return;
+      }
+    }
+
+    async function saveRecentBusAtco(atco, name, lat, lon) {
+      const currentList = appState.atcoHistory;
+      const alreadyExists = currentList.some(item => item.atco === atco);
+      if (alreadyExists) return;
+
+      let list = [...currentList];
+      list.unshift({ atco, name, lat, lon });
+      list = list.slice(0, MAX_BUS_ATCOS);
+      appState.atcoHistory = list;
+
+      try {
+        const blob = new Blob(
+          [JSON.stringify(list, null, 2)],
+          { type: 'application/json' }
+        );
+
+        const formData = new FormData();
+        formData.append('file', blob, 'atco-history.json');
+
+        const response = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          await bsAlert("Failed to save ATCO history to board.",sysErr);
+          return;
+        }
+      } catch (err) {
+        await bsAlert("Failed to upload ATCO history: " + err.message,sysErr);
+      }
+      renderAtcoHistory();
+    }
+
+    function findSavedBusAtco(atco) {
+      const list = appState.atcoHistory;
+      return list.find(item => item.atco === atco) || null;
+    }
+
+    function renderAtcoHistory() {
+      const list = appState.atcoHistory;
+      if (!list.length) {
+        show("busAtcoHistory", false);
+        return;
+      }
+
+      const datalist = document.getElementById("busAtcoHistoryList");
+      datalist.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = "";
+      option.label = "Select a recent ATCO code...";
+      datalist.appendChild(option);
+
+      list.forEach(item => {
+        const option = document.createElement("option");
+        option.value = item.atco;
+        option.textContent = item.name + " (" + item.atco + ")";
+        datalist.appendChild(option);
+      });
+      show("busAtcoHistory", true);
+    }
+
+    function handleAtcoHistorySelect() {
+      const atco = elements.busAtcoHistoryList.value;
+      const saved = findSavedBusAtco(atco);
+
+      if (!saved) return;
+
+      elements.busAtco.value = saved.atco;
+      appState.busId = saved.atco;
+      appState.busName = saved.name;
+      appState.busLat = saved.lat;
+      appState.busLon = saved.lon;
+      appState.busIdOK = true;
+
+      elements.busLongName.innerHTML = "Location: <b>" + saved.name + "</b>";
+      enableSave(true);
+      toggleBusFilterBox();
+    }
+
+    async function handleClearHistory() {
+      try {
+        const response = await fetch('/del?f=/atco-history.json');
+      } catch { }
+      appState.atcoHistory = [];
+      renderAtcoHistory();
+    }
+
+    async function validateCSVFilter(input, errorMessage) {
+      const trimmed = input.trim();
+
+      if (!trimmed.length) {
+        return {
+          ok: true,
+          value: ""
+        };
+      }
+
+      if (trimmed.includes('"')) {
+        await bsAlert('Double quotes (") are not allowed in the platform/bus service filters.');
+        return {
+          ok: false
+        };
+      }
+
+      const csvRegex = /^[^,\s]+(\s*,\s*[^,\s]+)*$/;
+      if (!csvRegex.test(trimmed)) {
+        await bsAlert(errorMessage);
+        return {
+          ok: false
+        };
+      }
+
+      return {
+        ok: true,
+        value: trimmed
+      };
+    }
+
+    async function validatePlatformFilter() {
+      const input = elements.platformFilter.value;
+      const result = await validateCSVFilter(input, platformFilterError);
+      if (!result.ok) appState.platformFilterOK = false;
+      else {
+        appState.platformFilterOK = true;
+        appState.platformFilter = result.value;
+      }
+    }
+
+    async function validateBusFilter() {
+      const input = elements.busFilter.value;
+      const result = await validateCSVFilter(input, busFilterError);
+      if (!result.ok) appState.busFilterOK = false;
+      else {
+        appState.busFilterOK = true;
+        appState.busFilter = result.value;
+      }
+    }
+
+    async function validateTZ() {
+      const regex = /^([A-Za-z]{3,})([+-]?(?:[0-9]|1[0-4])(?::[0-5][0-9])?(?::[0-5][0-9])?)?([A-Za-z]{3,})?(?:,M(0?[1-9]|1[0-2])\.(?:[1-4]|5)\.[0-6](?:\/(?:[0-9]|1[0-9]|2[0-4]))?,M(0?[1-9]|1[0-2])\.(?:[1-4]|5)\.[0-6](?:\/(?:[0-9]|1[0-9]|2[0-4]))?)?$/;
+      const value = elements.customTZ.value.trim();
+      appState.tzOK = true;
+      if (!value.length) return;
+      if (regex.test(value)) return;
+      appState.tzOK = false;
+      await bsAlert(tzError);
+    }
+
+    async function validateHostname() {
+      const regex = /^(?!-)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+      const value = elements.customHost.value.trim();
+      appState.hostnameOK = true;
+      if (!value.length) return;
+      if (regex.test(value)) return;
+      appState.hostnameOK = false;
+      await bsAlert(hostnameError);
+    }
+
+    const substringMatcher = () => {
+      return (q, cb) => {
+        if (q.length > 2) {
+          $.ajax({
+            url: '/stationpicker?q=' + encodeURIComponent(q),
+            method: 'GET',
+            success: function (data) {
+              const stations = data.payload.stations.filter(s => s.kbState !== 0);
+              cb(stations);
+            },
+            error: function (xhr, status, error) {
+              console.error(`Station fetch failed: ${status} - ${error}`);
+              cb([]);
+            }
+          });
+        } else {
+          cb([]);
+        }
+      };
+    };
+
+    const substringMatcherTfL = () => {
+      return (q, cb) => {
+        if (q.length > 2) {
+          $.ajax({
+            url: 'https://api.tfl.gov.uk/StopPoint/Search/' + encodeURIComponent(q) + '?modes=tube,dlr&maxResults=10&faresOnly=False&includeHubs=False&app_key=' + appState.appKey,
+            method: 'GET',
+            success: function (data) {
+              const stations = data.matches.filter(s => s.kbState !== 0);
+              cb(stations);
+            },
+            error: function (xhr, status, error) {
+              console.error(`UG Station fetch failed: ${status} - ${error}`);
+              cb([]);
+            }
+          });
+        } else {
+          cb([]);
+        }
+      };
+    };
+
+    $(function () {
+      $('[data-bs-toggle="tooltip"]').tooltip();
+    });
+
+    $(elements.searchName).typeahead({
+      name: 'stations',
+      source: substringMatcher(),
+      delay: 300,
+      updater: function (item) {
+        handleStationSelected(item);
+        return item;
+      },
+      highlighter: function (item) {
+        return '<img src="irail.webp" style="margin-right:6px">' + item;
+      }
+    });
+
+    $(elements.callingStation).typeahead({
+      name: 'stations',
+      source: substringMatcher(),
+      delay: 300,
+      updater: function (item) {
+        handleCallingStationSelected(item);
+        return item;
+      },
+      highlighter: function (item) {
+        return '<img src="nr.webp" style="margin-right:6px">' + item;
+      }
+    });
+
+    $(elements.searchNameTfL).typeahead({
+      name: 'stations',
+      source: substringMatcherTfL(),
+      delay: 300,
+      updater: function (item) {
+        handleTfLStationSelected(item);
+        return item;
+      },
+      highlighter: function (item) {
+        return '<img src="tube.webp" style="margin-right:6px">' + item;
+      }
+    });
+
+    elements.form.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!appState.busFilterOK) await bsAlert(busFilterError);
+      else if (!appState.platformFilterOK) await bsAlert(platformFilterError);
+      else if (!appState.tzOK) await bsAlert(tzError);
+      else if (!appState.hostnameOK) await bsAlert(hostnameError);
+      else handleSave();
+    });
+
+    elements.searchName.addEventListener("focus", () => elements.searchName.select());
+    elements.searchName.addEventListener("blur", () => setTimeout(handleStationLostFocus, 500));
+    elements.callingStation.addEventListener("focus", () => elements.callingStation.select());
+    elements.callingStation.addEventListener("blur", () => setTimeout(handleCallingStationLostFocus, 500));
+    elements.platformFilter.addEventListener("blur", validatePlatformFilter);
+    elements.searchNameTfL.addEventListener("focus", () => elements.searchNameTfL.select());
+    elements.searchNameTfL.addEventListener("blur", () => setTimeout(handleTfLStationLostFocus, 500));
+    elements.tubeLineFilter.addEventListener("change", (e) => {
+      appState.tubeLineId = e.target.value;
+      if (appState.tubeLineId === "all") {
+        show("tflDirectionFilterBox", false);
+        appState.tubeDirection = "";
+        elements.tubeDirectionFilter.value = "";
+      } else {
+        updateDirectionLabels(appState.tubeLineId);
+        show("tflDirectionFilterBox", true);
+      }
+    });
+    elements.tubeDirectionFilter.addEventListener("change", (e) => { appState.tubeDirection = e.target.value; });
+    elements.enableSleep.addEventListener("change", toggleSleepSelectors);
+    elements.brightness.addEventListener("change", handleBrightnessChange);
+    elements.volume.addEventListener("change", handleVolumeChange);
+    elements.enableAudio.addEventListener("change", () => { show("optAudio", isChecked("enableAudio")); });
+    elements.clearButton.addEventListener("click", handleClearFilter);
+    elements.verifyAtcoButton.addEventListener("click", handleVerifyAtco);
+    elements.clearHistoryButton.addEventListener("click", handleClearHistory);
+    elements.busAtcoHistoryList.addEventListener('change', handleAtcoHistorySelect);
+    elements.busFilter.addEventListener("blur", validateBusFilter);
+    elements.optTouch.addEventListener("change", () => { show("optStayAwake", isChecked("optTouch")); show("optLongPressClock", isChecked("optTouch"));});
+    elements.optTZ.addEventListener("change", () => { show("customTZbox", isChecked("optTZ")); if (!isChecked("optTZ")) { elements.customTZ.value = ""; appState.tzOK = true; } });
+    elements.customTZ.addEventListener("blur", validateTZ);
+    elements.optHost.addEventListener("change", () => { show("customHostbox", isChecked("optHost")); if (!isChecked("optHost")) { elements.customHost.value = ""; appState.hostnameOK = true; } });
+    elements.customHost.addEventListener("blur", validateHostname);
+    elements.dataSource.addEventListener("change", () => { if (elements.dataSource.value != "") {appState.dataSource = parseInt(elements.dataSource.value); applyBoardMode(); }});
+    elements.enableScheduler.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            elements.enableCarousel.checked = false;
+        }
+    });
+    elements.enableCarousel.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            elements.enableScheduler.checked = false;
+        }
+    });
+
+    let timeModalInstance;
+    elements.btnAddToScheduler.addEventListener('click', async () => {
+        if (appState.scheduler.length >= 5) return;
+        if (!appState.busFilterOK) await bsAlert(busFilterError);
+        else if (!appState.platformFilterOK) await bsAlert(platformFilterError);
+        else {
+          if (!timeModalInstance) {
+              timeModalInstance = new bootstrap.Modal(document.getElementById('timePromptModal'));
+          }
+          timeModalInstance.show();
+        }
+    });
+
+    document.getElementById('btnConfirmTime').addEventListener('click', () => {
+      const hour = document.getElementById('scheduleHour').value;
+      const minute = document.getElementById('scheduleMinute').value;
+      const timeStr = `${hour}:${minute}`;
+
+      const config = getCurrentLocationConfig();
+      config.time = timeStr;
+
+      // Check if an entry for this exact time already exists
+      const existingIndex = appState.scheduler.findIndex(item => item.time === timeStr);
+
+      if (existingIndex !== -1) {
+        // Replace the existing entry with the new configuration
+        appState.scheduler[existingIndex] = config;
+      } else {
+        // Otherwise, add it as a new entry
+        appState.scheduler.push(config);
+      }
+
+      // Maintain chronological order
+      appState.scheduler.sort((a, b) => a.time.localeCompare(b.time));
+
+      timeModalInstance.hide();
+      renderLists();
+      applyBoardMode();
+    });
+
+    let carouselModalInstance;
+    elements.btnAddToCarousel.addEventListener('click', async () => {
+        if (appState.carousel.length >= 5) return;
+        if (!appState.busFilterOK) await bsAlert(busFilterError);
+        else if (!appState.platformFilterOK) await bsAlert(platformFilterError);
+        else {
+          if (!carouselModalInstance) {
+              carouselModalInstance = new bootstrap.Modal(document.getElementById('carouselDurationModal'));
+          }
+          carouselModalInstance.show();
+        }
+    });
+
+    document.getElementById('btnConfirmCarousel').addEventListener('click', () => {
+        const duration = document.getElementById('carouselDuration').value;
+        const config = getCurrentLocationConfig();
+        config.duration = parseInt(duration); // Save the duration
+
+        appState.carousel.push(config);
+        carouselModalInstance.hide();
+        renderLists();
+        applyBoardMode();
+    });
+
+    // Themes functionality event listeners
+    document.getElementById("themeSelector").addEventListener("change", (e) => {
+      appState.activeThemeFile = e.target.value;
+      appState.jsonSettings.theme = e.target.value;
+      updateThemeButtons();
+      loadThemeData(appState.activeThemeFile);
+    });
+
+    // Open the Bootstrap modal when "Save As..." is clicked
+    document.getElementById("btnSaveTheme").addEventListener("click", () => {
+      const input = document.getElementById("themeNameInput");
+      input.value = ""; // Clear previous value
+
+      const modalEl = document.getElementById("saveThemeModal");
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    });
+
+    // Process saving when confirming inside the modal
+    document.getElementById("btnConfirmSaveTheme").addEventListener("click", async () => {
+      const input = document.getElementById("themeNameInput");
+      let newName = input.value.trim();
+
+      // 1. Validate input exists
+      if (!newName) {
+        await bsAlert("The theme name cannot be empty. Please enter a valid name.");
+        return;
+      }
+
+      // 2. Validate allowed characters and length (up to 32 chars)
+      const validRegex = /^[A-Za-z0-9_ ]{1,32}$/;
+      if (!validRegex.test(newName)) {
+        await bsAlert("Invalid theme name. Use up to 32 alphanumeric characters, spaces, or underscores.");
+        return;
+      }
+
+      // Preserve user casing for the actual filename
+      const fileName = `ct_${newName}`;
+
+      // Helper function to normalize strings for case-insensitive comparison
+      const normalize = (str) => (str || "").trim().toLowerCase().replace(/^\//, '').replace(/\.json$/, '');
+
+      // 3. Case-insensitive check against all system (non-user) themes
+      const isSystemThemeConflict = appState.availableThemes.some(t => {
+        if (t.user) return false; // Ignore user-created themes
+
+        const sysName = normalize(t.name);
+        const sysFile = normalize(t.file);
+        const targetName = normalize(newName);
+        const targetFile = normalize(fileName);
+
+        return sysName === targetName || sysFile === targetFile;
+      });
+
+      if (isSystemThemeConflict) {
+        await bsAlert(`"${newName}" conflicts with a protected system theme name. Please choose a different name.`);
+        return;
+      }
+
+      // Hide the modal prior to saving
+      const modalEl = document.getElementById("saveThemeModal");
+      const modal = bootstrap.Modal.getInstance(modalEl);
+      if (modal) modal.hide();
+
+      try {
+        const blob = new Blob(
+          [JSON.stringify(appState.currentThemeData, null, 2)],
+          { type: 'application/json' }
+        );
+        const formData = new FormData();
+        formData.append('file', blob, `${fileName}.json`);
+
+        const response = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          await bsAlert("Failed to save theme.", "System Error");
+          return;
+        }
+
+        appState.jsonSettings.theme = fileName;
+        await fetchThemes();
+        await bsAlert("Theme saved successfully. Remember to <b>Save Settings</b> for the changes to take effect on the board.",sysName,8000);
+      } catch (err) {
+        await bsAlert("Error saving theme: " + err.message, "System Error");
+      }
+    });
+
+    document.getElementById("btnSaveExistingTheme").addEventListener("click", async () => {
+      try {
+        const blob = new Blob(
+          [JSON.stringify(appState.currentThemeData, null, 2)],
+          { type: 'application/json' }
+        );
+        const formData = new FormData();
+
+        // Use the current active theme file name (which already includes "ct_")
+        formData.append('file', blob, `${appState.activeThemeFile}.json`);
+
+        const response = await fetch('/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          await bsAlert("Failed to update theme.", "System Error");
+          return;
+        }
+
+        await bsAlert("Theme updated successfully. Remember to <b>Save Settings</b> for the changes to take effect on the board.",sysName,8000);
+      } catch (err) {
+        await bsAlert("Error updating theme: " + err.message, "System Error");
+      }
+    });
+
+    document.getElementById("btnDeleteTheme").addEventListener("click", async () => {
+      const currentTheme = appState.availableThemes.find(t => t.file === appState.activeThemeFile);
+
+      // Guard clause to explicitly block non-user theme deletion
+      if (!currentTheme || !currentTheme.user) {
+        await bsAlert("System themes cannot be deleted.", "Action Denied");
+        return;
+      }
+
+      if (await bsConfirm(`Are you sure you want to delete "${currentTheme.name}"?`)) {
+        try {
+          const response = await fetch(`/del?f=/${appState.activeThemeFile}.json`);
+          if (response.ok) {
+            appState.jsonSettings.theme = "ct_default";
+            await fetchThemes();
+          }
+        } catch (err) {
+          await bsAlert("Failed to delete theme: " + err.message);
+        }
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      await fetchRssFeeds();
+      await fetchApiKeys();
+      await fetchVoices();
+      await fetchConfig();
+      await fetchThemes();
+      await fetchFirmware();
+      await fetchPrevFirmware();
+      await fetchAtcoHistory();
+      ['/nr.webp', '/tube.webp'].forEach(src => {
+        const img = new Image();
+        img.src = src;
+      });
+      await checkUpgradeNotice();
+    });
+
+    $("input[name=boardmode]").on("change", function () {
+      appState.boardMode = parseInt(this.value);
+      applyBoardMode();
+    });
+
+    // List manipulation functions (Make globally accessible for inline handlers)
+    window.removeListItem = (listName, index) => {
+        appState[listName].splice(index, 1);
+        renderLists();
+        applyBoardMode();
+    };
+
+    window.moveCarouselItem = (index, dir) => {
+        if (index + dir < 0 || index + dir >= appState.carousel.length) return;
+        const item = appState.carousel.splice(index, 1)[0];
+        appState.carousel.splice(index + dir, 0, item);
+        renderLists();
+    };
+
+    async function fetchConfig() {
+      try {
+        const response = await fetch('/config.json');
+        if (!response.ok) throw new Error("Failed to fetch config.json from file system.");
+        appState.jsonSettings = await response.json();
+        deleteLegacySettings();
+        loadSettings();
+      } catch (err) {
+        await bsAlert(`Error loading config: ${err.message}`,sysErr);
+      }
+    }
+
+    async function fetchFirmware() {
+      try {
+        const response = await fetch('/firmware');
+        if (!response.ok) return;
+        const contentType = response.headers.get("Content-Type");
+        if (contentType === "application/json") {
+          const jsonInfo = await response.json();
+          appState.firmwareVersion = jsonInfo.firmware || "";
+          elements.fwinfo.innerHTML = '<a href="https://github.com/gadec-uk/matrix-departures-board/releases" target="_blank">Firmware: ' + appState.firmwareVersion + '</a>';
+        }
+      } catch (err) {
+        console.error("Firmware fetch error:", err);
+      }
+    }
+
+    async function fetchVoices() {
+      try {
+        const response = await fetch('/voices');
+        if (!response.ok) return;
+        const contentType = response.headers.get("Content-Type");
+        if (contentType === "application/json") {
+          appState.voices = await response.json();
+          appState.voices.forEach(voice => {
+            const option = document.createElement('option');
+            option.value = voice.path;
+            option.textContent = voice.config.name;
+            elements.announcerVoice.appendChild(option);
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching voices:", err);
+      }
+    }
+
+    async function fetchPrevFirmware() {
+      try {
+        const response = await fetch('/fw.json');
+        if (response.ok) {
+          appState.jsonPrevFirmware = await response.json();
+        }
+      } catch (err) {
+        console.error("Prev Firmware fetch error:", err);
+      }
+      appState.prevFirmwareVersion = appState.jsonPrevFirmware.fw ?? "";
+    }
+
+    async function fetchApiKeys() {
+      try {
+        const response = await fetch('/apikeys.json');
+        const data = await response.json();
+        appState.appKey = data.appKey || "";
+        const select = document.getElementById("dataSource");
+        if (!data.nrToken || data.nrToken.length != 36) {
+          appState.validNatRailToken = false;
+        } else {
+          const option = document.createElement("option");
+          option.value = 0;
+          option.textContent = "Darwin Lite (Legacy)";
+          select.appendChild(option);
+        }
+        if (!data.rdmDepKey || data.rdmDepKey.length < 32) {
+          appState.validRdgRailToken = false;
+        } else {
+          const option = document.createElement("option");
+          option.value = 1;
+          option.textContent = "Rail Delivery Group";
+          select.appendChild(option);
+        }
+        if (!data.rdmSvcKey || data.rdmSvcKey.length < 32) {
+          appState.validRdgServiceToken = false;
+        }
+      } catch (err) {
+        console.warn("Could not load api keys.");
+      }
+    }
+
+    async function checkUpgradeNotice() {
+      if (appState.firmwareVersion == appState.prevFirmwareVersion) return;
+      try {
+        const response = await fetch(githubRepo);
+        if (response.ok) {
+          const data = await response.json();
+          const latestTag = data.tag_name;
+          const latestRelNotes = formatChangelog(data.body);
+          if (appState.firmwareVersion == latestTag) {
+            // Just upgraded to latest version, show release notes
+            await bsAlert(`<b>Release Notes:</b>\n${latestRelNotes}\n\n`,"Firmware Upgraded");
+          }
+          appState.jsonPrevFirmware.fw = appState.firmwareVersion;
+          await saveFwVersionSeen();
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function saveFwVersionSeen() {
+      try {
+        const blob = new Blob(
+          [JSON.stringify(appState.jsonPrevFirmware,null,2)],
+          {type:'application/json'}
+        );
+
+        const formData = new FormData();
+        formData.append('file', blob, 'fw.json');
+        const response = await fetch('/upload', {method:'POST',body:formData});
+
+        if (!response.ok) {
+          await bsAlert("Failed to save notes as read to board.",sysErr);
+          return;
+        }
+      } catch (err) {
+        await bsAlert("Failed to upload firmware data to board: " + err.message,sysErr);
+      }
+    }
+
+    async function getBusStopName(busId) {
+      try {
+        const response = await fetch(`https://bustimes.org/api/stops/${busId}`);
+
+        if (!response.ok) {
+          appState.busName = "";
+          appState.busLat = 0;
+          appState.busLon = 0;
+          return false;
+        }
+
+        const data = await response.json();
+        appState.busName = data.long_name ?? "";
+        if (Array.isArray(data.location) && data.location.length === 2) {
+          appState.busLon = data.location[0];
+          appState.busLat = data.location[1];
+        } else {
+          appState.busLat = 0;
+          appState.busLon = 0;
+        }
+        return true;
+
+      } catch (error) {
+        console.error("Error fetching bus stop data:", error);
+        appState.busName = "";
+        appState.busLat = 0;
+        appState.busLon = 0;
+        return false;
+      }
+    }
+
+    async function handleVerifyAtco() {
+      const userAtco = elements.busAtco.value.trim();
+      const success = await getBusStopName(userAtco);
+      if (success) {
+        appState.busId = userAtco;
+        appState.busIdOK = true;
+        elements.busLongName.innerHTML = "Location: <b>" + appState.busName + "</b>";
+        saveRecentBusAtco(userAtco, appState.busName, appState.busLat, appState.busLon);
+        enableSave(true);
+        toggleBusFilterBox();
+      } else {
+        enableSave(false);
+        elements.busLongName.innerHTML = "";
+        appState.busIdOK = false;
+        toggleBusFilterBox();
+        await bsAlert("The Bus Stop ATCO code you entered could not be found.");
+      }
+    }
+
+    function toggleSleepSelectors() {
+      const enabled = elements.enableSleep.checked;
+      show("sleepTimeSelectors", enabled);
+    }
+
+    function toggleBusFilterBox() {
+      show("busFilterBox", appState.busIdOK);
+    }
+
+    function applyBoardMode() {
+      const mode = appState.boardMode;
+
+      const rail = (mode === 0 && (appState.validNatRailToken || appState.validRdgRailToken));
+      const tube = (mode === 1);
+      const bus = (mode === 2);
+
+      show("nrT", rail);
+      show("nrSearchBox", rail);
+      show("nrCallingBox", rail);
+      show("nrAtt", rail && appState.dataSource == 0);
+      show("rdgAtt", rail && appState.dataSource == 1);
+      show("optBuses", rail);
+      show("optShowServiceMsgs", rail || tube);
+      show("optShowPlatform", rail);
+      show("optShowOrdinals",rail);
+      show("optShowLastSeen", rail && (appState.dataSource == 0 || appState.validRdgServiceToken));
+      show("optShowFullCalling",rail);
+      show("optShowFullMsgs", rail || tube);
+      show("optShowClockNoServices", rail);
+      show("optFastRefresh", rail);
+      show("optNoScroll", rail || tube);
+      show("optRssFeed", rail || tube);
+      show("optDataSource", rail);
+      show("optNrTimeOffset", rail);
+      show("nrInvalidToken", mode === 0 && !appState.validNatRailToken && !appState.validRdgRailToken);
+
+      show("tflT", tube);
+      show("tflSearchBox", tube);
+      show("tflAtt", tube);
+      show("optShowTubeLocation", tube);
+
+      show("busT", bus);
+      show("busAtcoBox", bus);
+      show("btAtt", bus);
+      if (bus) {
+        renderAtcoHistory();
+        const iframe = document.querySelector('#bustimesMap');
+        if (iframe) {
+          iframe.style.width = '99%';
+          setTimeout(() => { iframe.style.width = '100%'; }, 100);
+        }
+      }
+
+      if (
+        (rail && appState.stationName) ||
+        (tube && appState.tubeName) ||
+        (bus && appState.busIdOK)
+      ) {
+        enableSave(true);
+      } else {
+        enableSave(false);
+      }
+      //elements.btnAddToScheduler.disabled = appState.scheduler.length >= 5;
+      //elements.btnAddToCarousel.disabled = appState.carousel.length >= 5;
+      highlightModeButtons(mode);
+    }
+
+    function highlightModeButtons(mode) {
+      document.getElementById("modeRail").checked = (mode === 0);
+      document.getElementById("modeTube").checked = (mode === 1);
+      document.getElementById("modeBus").checked = (mode === 2);
+    }
+
+    function validateAtcoFormat() {
+      const atcoPattern = /^\d{3}0.{1,}$/;
+      const atcoVal = $('#busAtco').val().trim();
+      const atcoEntered = atcoVal.length > 0;
+      const atcoValid = atcoEntered && atcoPattern.test(atcoVal);
+      elements.verifyAtcoButton.disabled = !atcoValid;
+    }
+
+    elements.busAtco.addEventListener('input', function () {
+      validateAtcoFormat();
+      enableSave(false);
+      elements.busLongName.innerHTML = "";
+      appState.busIdOK = false;
+      toggleBusFilterBox();
+    });
+
+    function getCurrentLocationConfig() {
+        let config = {
+            mode: appState.boardMode,
+            name: "", filter: ""
+        };
+
+        if (appState.boardMode === 0) { // Rail
+            config.name = appState.stationName;
+            config.crs = appState.stationCRS;
+            config.lat = appState.stationLatitude;
+            config.lon = appState.stationLongitude;
+            config.callingStation = appState.callingStation;
+            config.callingCrs = appState.callingCrs;
+            config.platformFilter = appState.platformFilter;
+            config.filter = [appState.callingStation ? `Calling at: ${appState.callingStation}` : "",
+                              appState.platformFilter ? `Platform: ${appState.platformFilter}` : ""].filter(Boolean).join(", ");
+        } else if (appState.boardMode === 1) { // Tube
+            config.name = appState.tubeName;
+            config.name = config.name.replace(/ (Underground Station|DLR Station|\(H&C Line\))$/i, "");
+            config.tubeId = appState.tubeId;
+            config.lineid = appState.tubeLineId;
+            config.direction = appState.tubeDirection;
+            config.lat = appState.tubeLat;
+            config.lon = appState.tubeLon;
+            config.filter = [appState.tubeLineId !== "all" ? `Line: ${appState.tubeLineId}` : "",
+                              appState.tubeDirection ? `Dir: ${appState.tubeDirection}` : ""].filter(Boolean).join(", ");
+        } else { // Bus
+            config.name = appState.busName;
+            config.busId = appState.busId;
+            config.lat = appState.busLat;
+            config.lon = appState.busLon;
+            config.busFilter = appState.busFilter;
+            config.filter = appState.busFilter ? `Services: ${appState.busFilter}` : "";
+        }
+        return config;
+    }
+
+    function renderLists() {
+
+        appState.scheduler.sort((a, b) => a.time.localeCompare(b.time));
+
+        const getIcon = (mode) => {
+            if (mode === 0) return '<img src="/irail.webp" style="height:13px; margin-right:6px; vertical-align:middle;">';
+            if (mode === 1) return '<img src="/itube.webp" style="height:13px; margin-right:6px; vertical-align:middle;">';
+            if (mode === 2) return '<img src="/ibus.webp" style="height:13px; margin-right:6px; vertical-align:middle;">';
+            return '';
+        };
+
+        if (appState.scheduler.length === 0) {
+          elements.schedulerListContainer.innerHTML = '<div class="text-muted fst-italic px-3 py-2">No items added to the scheduler.</div>';
+          elements.enableScheduler.checked = false;
+          elements.enableScheduler.disabled = true;
+        } else {
+          elements.enableScheduler.disabled = false;
+          elements.schedulerListContainer.innerHTML = '';
+          appState.scheduler.forEach((item, index) => {
+              const div = document.createElement('div');
+              div.className = 'list-group-item d-flex align-items-start';
+              div.innerHTML = `
+                  <div class="flex-shrink-0">${getIcon(item.mode)}</div>
+                    <div class="flex-grow-1 pe-2"><span class="me-1"><strong>${item.name}</strong></span>
+                        <span class="badge bg-secondary">${item.time}</span>
+                        <div class="small text-muted">${item.filter || "No filters"}</div>
+                    </div>
+                    <div class="flex-shrink-0">
+                      <button class="btn btn-sm btn-danger" onclick="removeListItem('scheduler', ${index})"><i class="bi bi-trash"></i></button>
+                    </div>
+                  </div>
+              `;
+              elements.schedulerListContainer.appendChild(div);
+          });
+        }
+
+        if (appState.carousel.length === 0) {
+          elements.carouselListContainer.innerHTML = '<div class="text-muted fst-italic px-3 py-2">No items added to the carousel.</div>';
+          elements.enableCarousel.checked = false;
+          elements.enableCarousel.disabled = true;
+        } else {
+          elements.enableCarousel.disabled = false;
+          elements.carouselListContainer.innerHTML = '';
+          appState.carousel.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'list-group-item d-flex align-items-start';
+            div.innerHTML = `
+                <div class="flex-shrink-0">${getIcon(item.mode)}</div>
+                  <div class="flex-grow-1 pe-2"><span class="me-1"><strong>${item.name}</strong></span>
+                      <span class="badge bg-primary">${item.duration} ${item.duration == 1 ? 'min' : 'mins'}</span>
+                      <div class="small text-muted">${item.filter || "No filters"}</div>
+                  </div>
+                  <div class="flex-shrink-0 btn-group btn-group-sm ms-2">
+                    <button class="btn btn-outline-secondary" onclick="moveCarouselItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}><i class="bi bi-arrow-up"></i></button>
+                    <button class="btn btn-outline-secondary" onclick="moveCarouselItem(${index}, 1)" ${index === appState.carousel.length - 1 ? 'disabled' : ''}><i class="bi bi-arrow-down"></i></button>
+                    <button class="btn btn-danger" onclick="removeListItem('carousel', ${index})"><i class="bi bi-trash"></i></button>
+                  </div>
+                </div>
+            `;
+            elements.carouselListContainer.appendChild(div);
+        });
+      }
+    }
+
+    function deleteLegacySettings() {
+      const keysToRemove=["altCrs","altStation","altLat","altLon","altStarts","altEnds","altCallingStation","altCallingCrs","altPlatformFilter"];
+      for (const key of keysToRemove) {delete appState.jsonSettings[key];}
+    }
+
+    function loadSettings() {
+      const s = appState.jsonSettings;
+      appState.stationName = s.station || "";
+      appState.stationCRS = s.crs || "";
+      appState.stationLatitude = s.lat ?? 0;
+      appState.stationLongitude = s.lon ?? 0;
+
+      appState.callingStation = s.callingStation || "";
+      appState.callingCrs = s.callingCrs || "";
+      appState.platformFilter = s.platformFilter || "";
+
+      appState.tubeName = s.tubeName || "";
+      appState.tubeId = s.tubeId || "";
+      appState.tubeLineId = s.lineid || "all";
+      appState.tubeDirection = s.direction || "";
+      appState.tubeLat = s.tubeLat ?? 0;
+      appState.tubeLon = s.tubeLon ?? 0;
+
+      appState.busId = s.busId || "";
+      appState.busName = s.busName || "";
+      appState.busLat = s.busLat ?? 0;
+      appState.busLon = s.busLon ?? 0;
+      appState.busIdOK = appState.busId.length > 0 && appState.busName.length > 0;
+      appState.busFilter = s.busFilter || "";
+      appState.boardMode = s.mode ?? (s.tube != undefined ? (s.tube ? 1 : 0) : 0);
+      delete s.tube;
+      elements.dataSource.value = s.dataSource ?? (appState.validRdgRailToken ? 1 : 0);
+      if (elements.dataSource.value != "") appState.dataSource = parseInt(elements.dataSource.value);
+      if (!appState.validNatRailToken && !appState.validRdgRailToken && appState.boardMode == 0) {
+        appState.boardMode = 1;
+      }
+      highlightModeButtons(appState.boardMode);
+      elements.searchName.value = appState.stationName;
+      elements.callingStation.value = appState.callingStation;
+      elements.platformFilter.value = appState.platformFilter;
+      elements.searchNameTfL.value = appState.tubeName;
+      if (appState.tubeId) {
+        fetchTubeLines(appState.tubeId, appState.tubeLineId);
+      }
+      elements.tubeDirectionFilter.value = appState.tubeDirection;
+      elements.busAtco.value = appState.busId;
+      elements.busFilter.value = appState.busFilter;
+      elements.brightness.value = s.brightness ?? 50;
+      const pct = (elements.brightness.value / 255) * 100;
+      elements.brightness.title = Math.round(pct) + "%";
+
+      if (appState.busName.length) elements.busLongName.innerHTML = "Location: <b>" + appState.busName + "</b>";
+      toggleBusFilterBox();
+      elements.customTZ.value = s.TZ || "";
+      setCheckbox("optTZ", elements.customTZ.value.length);
+      show("customTZbox", elements.customTZ.value.length);
+
+      elements.customHost.value = s.hostname || "";
+      setCheckbox("optHost", elements.customHost.value.length);
+      show("customHostbox", elements.customHost.value.length);
+
+      elements.volume.value = s.volume ?? 65;
+      const vpct = (elements.volume.value / 191) * 100;
+      elements.volume.title = Math.round(vpct) + "%";
+      setCheckbox("enableAudio", s.enableAudio);
+      show("optAudio", s.enableAudio);
+      setCheckbox("enableReverb", s.enableReverb);
+      setCheckbox("enableAudioCalling", s.enableAudioCalling);
+
+      setCheckbox("enableSleep", s.sleep);
+      setCheckbox("sleepUseBigClock", s.sleepUseBigClock);
+      setCheckbox("enableBuses", s.showBus);
+      setCheckbox("showClockNoServices", s.showClockNoServices);
+      setCheckbox("enableFirmware", s.update);
+      setCheckbox("enableFirmwareDaily", s.updateDaily);
+      setCheckbox("showLocation", s.showLocation ?? true);
+      setCheckbox("enableWeather", s.weather);
+      setCheckbox("showPlatform", !(s.hidePlatform ?? false));
+      setCheckbox("showOrdinals", !(s.hideOrdinals ?? false));
+      setCheckbox("showLastSeen", s.showLastSeen);
+      setCheckbox("showServiceMsgs", s.showServiceMsgs ?? true);
+      setCheckbox("showTubeLocation", s.showTubeLocation ?? false);
+      setCheckbox("showFullCalling", (s.showFullCalling ?? true));
+      setCheckbox("showFullMsgs", (s.showFullMsgs ?? true));
+      setCheckbox("enableFastRefresh", s.fastRefresh);
+      setCheckbox("noScrolling", s.noScroll);
+      setCheckbox("optFlip", s.flip);
+      setCheckbox("swapBG", s.swapBG);
+      setCheckbox("mx6126", s.mx6126);
+      setCheckbox("enableFTP", s.ftp);
+      setCheckbox("optTouch", s.touch);
+      setCheckbox("longPressClock", s.longPressClock);
+      setCheckbox("rssPriority", s.rssPriority);
+      show("optStayAwake",s.touch);
+      show("optLongPressClock",s.touch);
+
+      elements.sleepStart.value = s.sleepStarts;
+      elements.sleepEnd.value = s.sleepEnds;
+      elements.nrTimeOffset.value = s.nrTimeOffset ?? 0;
+      elements.forceWakeTime.value = s.forceWakeTime ?? 300;
+      const rssUrl = s.rssUrl || "";
+      const rssSelect = document.getElementById('rssFeedList');
+      const optionExists = rssSelect.querySelector(`option[value="${rssUrl}"]`);
+      rssSelect.value = optionExists ? rssUrl : "";
+      if (elements.announcerVoice.options.length === 0) {
+        setCheckbox("enableAudio",false);
+        show("optAudio",false);
+        document.getElementById("enableAudio").disabled = true;
+      } else {
+        const voice = s.voice || "";
+        const voiceExists = elements.announcerVoice.querySelector(`option[value="${voice}"]`)
+        if (voiceExists) elements.announcerVoice.value = voice;
+      }
+      toggleSleepSelectors();
+      document.getElementById('enableScheduler').checked = s.enableScheduler || false;
+      document.getElementById('enableCarousel').checked = s.enableCarousel || false;
+      appState.scheduler = s.scheduler || [];
+      appState.carousel = s.carousel || [];
+      renderLists();
+      applyBoardMode();
+    }
+
+    function setCheckbox(id, value) {
+      document.getElementById(id).checked = !!value;
+    }
+
+    function handleStationSelected(item) {
+      appState.stationSelected = true;
+      appState.stationName = item.name;
+      appState.stationCRS = item.crsCode;
+      appState.stationLatitude = item.latitude;
+      appState.stationLongitude = item.longitude;
+
+      if (item.classification === "LONDON_UNDERGROUND") {
+        enableSave(false);
+      } else {
+        enableSave(true);
+      }
+    }
+
+    function handleCallingStationSelected(item) {
+      appState.callingStationSelected = true;
+      appState.callingStation = item.name;
+      appState.callingCrs = item.crsCode;
+    }
+
+    async function fetchTubeLines(stopPointId, selectedLineId = "all") {
+      try {
+        const response = await fetch(`https://api.tfl.gov.uk/StopPoint/${stopPointId}?app_key=${appState.appKey}`);
+        if (!response.ok) throw new Error("Failed to fetch stop point data");
+        const data = await response.json();
+
+        elements.tubeLineFilter.innerHTML = "";
+
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "all";
+        defaultOption.textContent = "All lines";
+        elements.tubeLineFilter.appendChild(defaultOption);
+
+        if (data.lines && data.lines.length > 0) {
+          const allowedModes = ["tube","dlr"];
+          let validLineIds = [];
+
+          if (data.lineModeGroups) {
+            data.lineModeGroups.forEach(group => {
+              if (allowedModes.includes(group.modeName)) {
+                validLineIds = validLineIds.concat(group.lineIdentifier);
+              }
+            });
+          }
+
+          data.lines.forEach(line => {
+            if (validLineIds.includes(line.id)) {
+              const option = document.createElement("option");
+              option.value = line.id;
+              option.textContent = line.name;
+              elements.tubeLineFilter.appendChild(option);
+            }
+          });
+        }
+
+        elements.tubeLineFilter.value = selectedLineId;
+        show("tflLineFilterBox", true);
+
+        if (selectedLineId === "all") {
+          show("tflDirectionFilterBox", false);
+        } else {
+          updateDirectionLabels(selectedLineId);
+          show("tflDirectionFilterBox", true);
+        }
+      } catch (err) {
+        console.error("Error fetching tube lines:", err);
+        show("tflLineFilterBox", false);
+        show("tflDirectionFilterBox", false);
+      }
+    }
+
+    function handleTfLStationSelected(item) {
+      appState.stationSelectedTfL = true;
+      appState.tubeName = item.name;
+      appState.tubeId = item.id;
+      appState.tubeLat = item.lat;
+      appState.tubeLon = item.lon;
+      appState.tubeLineId = "all";
+      appState.tubeDirection = "";
+      elements.tubeDirectionFilter.value = "";
+      enableSave(true);
+      fetchTubeLines(item.id, "all");
+    }
+
+    function handleStationLostFocus() {
+      if (!appState.stationSelected) {
+        elements.searchName.value = appState.stationName;
+      } else {
+        appState.stationSelected = false;
+      }
+    }
+
+    function handleCallingStationLostFocus() {
+      if (!appState.callingStationSelected) {
+        elements.callingStation.value = appState.callingStation;
+      } else {
+        appState.callingStationSelected = false;
+      }
+    }
+
+    function handleTfLStationLostFocus() {
+      if (!appState.stationSelectedTfL) {
+        elements.searchNameTfL.value = appState.tubeName;
+      } else {
+        appState.stationSelectedTfL = false;
+      }
+    }
+
+    function handleClearFilter() {
+      appState.callingCrs = "";
+      appState.callingStation = "";
+      appState.callingStationSelected = false;
+      elements.callingStation.value = appState.callingStation;
+    }
+
+    function handleBrightnessChange() {
+      const brightness = this.value;
+      appState.jsonSettings.brightness = brightness;
+      fetch(`/brightness?b=${brightness}`);
+      const pct = (brightness / 255) * 100;
+      this.title = Math.round(pct) + "%";
+    }
+
+    function handleVolumeChange() {
+      const volume = this.value;
+      appState.jsonSettings.volume = volume;
+      fetch(`/vol?v=${volume}`);
+      const vpct = (volume / 191) * 100;
+      this.title = Math.round(vpct) + "%";
+    }
+
+    async function handleSave() {
+      const s = appState.jsonSettings;
+      let needRestart = (((s.hostname || "") != elements.customHost.value.trim()) || (s.enableAudio != isChecked("enableAudio")) || (s.swapBG != isChecked("swapBG")) || (s.mx6126 != isChecked("mx6126")) || (s.ftp != isChecked("enableFTP")) || (s.enableReverb != isChecked("enableReverb")));
+      s.station = appState.stationName;
+      s.crs = appState.stationCRS;
+      s.lat = appState.stationLatitude;
+      s.lon = appState.stationLongitude;
+      s.callingStation = appState.callingStation;
+      s.callingCrs = appState.callingCrs;
+      s.platformFilter = appState.platformFilter;
+      s.tubeId = appState.tubeId;
+      s.tubeName = appState.tubeName;
+      s.lineid = appState.tubeLineId;
+      s.direction = appState.tubeDirection;
+      s.tubeLat = appState.tubeLat;
+      s.tubeLon = appState.tubeLon;
+      s.mode = appState.boardMode;
+      s.brightness = parseInt(elements.brightness.value);
+      s.sleep = isChecked("enableSleep");
+      s.sleepUseBigClock = isChecked("sleepUseBigClock");
+      s.enableAudio = isChecked("enableAudio");
+      s.enableReverb = isChecked("enableReverb");
+      s.enableAudioCalling = isChecked("enableAudioCalling");
+      s.volume = parseInt(elements.volume.value);
+      s.voice = elements.announcerVoice.value;
+      s.showBus = isChecked("enableBuses");
+      s.showServiceMsgs = isChecked("showServiceMsgs");
+      s.showTubeLocation = isChecked("showTubeLocation");
+      s.update = isChecked("enableFirmware");
+      s.updateDaily = isChecked("enableFirmwareDaily");
+      s.showLocation = isChecked("showLocation");
+      s.weather = isChecked("enableWeather");
+      s.hidePlatform = !isChecked("showPlatform");
+      s.hideOrdinals = !isChecked("showOrdinals");
+      s.showLastSeen = isChecked("showLastSeen");
+      s.showFullCalling = isChecked("showFullCalling");
+      s.showFullMsgs = isChecked("showFullMsgs");
+      s.showClockNoServices = isChecked("showClockNoServices");
+      s.fastRefresh = isChecked("enableFastRefresh");
+      s.noScroll = isChecked("noScrolling");
+      s.flip = isChecked("optFlip");
+      s.swapBG = isChecked("swapBG");
+      s.mx6126 = isChecked("mx6126");
+      s.ftp = isChecked("enableFTP");
+      s.touch = isChecked("optTouch");
+      s.longPressClock = isChecked("longPressClock");
+      s.sleepStarts = parseInt(elements.sleepStart.value);
+      s.sleepEnds = parseInt(elements.sleepEnd.value);
+      s.nrTimeOffset = parseInt(elements.nrTimeOffset.value);
+      s.forceWakeTime = parseInt(elements.forceWakeTime.value);
+      s.rssUrl = elements.rssFeedList.value;
+      s.rssPriority = isChecked("rssPriority");
+      if (elements.dataSource.value != "") s.dataSource = parseInt(elements.dataSource.value);
+      var selectedText = document.querySelector("#rssFeedList option:checked").textContent;
+      s.rssName = selectedText;
+      if (appState.busIdOK) {
+        s.busName = appState.busName;
+        s.busId = appState.busId;
+        s.busLat = appState.busLat;
+        s.busLon = appState.busLon;
+        s.busFilter = appState.busFilter;
+      }
+      if (isChecked("optTZ") && elements.customTZ.value.trim().length) s.TZ = elements.customTZ.value.trim(); else delete s.TZ;
+      if (isChecked("optHost") && elements.customHost.value.trim().length) s.hostname = elements.customHost.value.trim(); else delete s.hostname;
+      s.enableScheduler = document.getElementById('enableScheduler').checked;
+      s.enableCarousel = document.getElementById('enableCarousel').checked;
+      s.scheduler = appState.scheduler;
+      s.carousel = appState.carousel;
+      s.theme = appState.activeThemeFile;
+      try {
+        const response = await fetch(`/savesettings${needRestart ? '?reboot=1' : ''}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(s)
+        });
+
+        const text = await response.text();
+        await bsAlert(text,sysName,4000);
+
+      } catch (err) {
+        await bsAlert(`Failed to save settings: ${err.message}`,sysErr);
+      }
+    }
+
+    function isChecked(id) {
+      return document.getElementById(id).checked;
+    }
+
+    function show(id, showme) {
+      if (showme) document.getElementById(id).style.display = "block";
+      else document.getElementById(id).style.display = "none";
+    }
+
+    function formatChangelog(text) {
+      const truncatedText = text.split('---')[0];
+      const formattedText = truncatedText.replace(/\n-/g, '\n•');
+      return formattedText;
+    }
+
+    async function handleCheckUpdates() {
+      try {
+        const response = await fetch(githubRepo);
+        if (!response.ok) throw new Error("Failed to fetch the latest release information from GitHub.");
+
+        const data = await response.json();
+        const latestTag = data.tag_name;
+        const currentTag = appState.firmwareVersion;
+        const latestRelNotes = formatChangelog(data.body);
+
+        if (!latestTag || !currentTag) {
+          await bsAlert("Could not compare firmware versions.",sysErr);
+          return;
+        }
+
+        const parseVersion = (str) => {
+          const match = str.match(/B(\d+)\.(\d+)-W(\d+)\.(\d+)/);
+          return match
+            ? {
+              B: { major: Number(match[1]), minor: Number(match[2]) },
+              W: { major: Number(match[3]), minor: Number(match[4]) }
+            }
+            : null;
+        };
+
+        const isNewer = (latest, current) => {
+          if (latest.major !== current.major) {
+            return latest.major > current.major;
+          }
+          return latest.minor > current.minor;
+        };
+
+        const latest = parseVersion(latestTag);
+        const current = parseVersion(currentTag);
+
+        if (!latest || !current) {
+          await bsAlert("Firmware version format invalid.",sysErr);
+          return;
+        }
+
+        if (isNewer(latest.B, current.B) || isNewer(latest.W, current.W)) {
+          if (await bsConfirm(`An update to version ${latestTag} is available.\n\nClick <b>OK</b> to install the update now or <b>Cancel</b> to abort.\n\n<b>Release Notes:</b>\n${latestRelNotes}\n\n`)) {
+            fetch('/ota', { method: 'GET' })
+              .then(res => res.text())
+              .then(msg => bsAlert(msg))
+              .catch(err => bsAlert('Error initiating update: '+err.message,sysErr));
+          }
+        } else {
+          await bsAlert(`No updates available. You are using the latest version.\n\n<b>Release Notes:</b>\n${latestRelNotes}`);
+        }
+      } catch (err) {
+        console.error(err);
+        await bsAlert("Error checking for updates: "+err.message,sysErr);
+      }
+    }
+
+    async function handleClearWifi() {
+      if (await bsConfirm('Are you sure you want to clear WiFi settings?',sysName,10000)) {
+        fetch('/erasewifi', { method: 'GET' })
+          .then(res => res.text())
+          .then(msg => bsAlert(msg,sysName))
+          .catch(err => bsAlert('Error clearing WiFi: '+err.message,sysErr));
+      }
+    }
+
+    async function handleRestartSystem() {
+      if (await bsConfirm('Are you sure you want to restart the system?',sysName,10000)) {
+        fetch('/reboot', { method: 'GET'})
+          .then(res => res.text())
+          .then(msg => bsAlert(msg,sysName,12000))
+          .catch(err => bsAlert('Error restarting system: '+err.message,sysErr));
+      }
+    }
+
+    // Utility function to generate dynamic Bootstrap 5 modals
+    function showBsModal(options) {
+      const {
+        title = 'Message',
+        body = '',
+        type = 'alert',
+        timeout = 0,
+        onConfirm = () => {},
+        onCancel = () => {}
+      } = options;
+
+      // Create unique ID for the modal
+      const modalId = 'bsModal-' + Date.now();
+
+      const modalHtml = `
+      <div class="modal fade" id="${modalId}" tabindex="-1" aria-labelledby="${modalId}Label" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="${modalId}Label">${title}</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" style="white-space: pre-wrap;">${body}</div>
+            <div class="modal-footer">
+              ${type === 'confirm' ? `<button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="${modalId}-btn-cancel">Cancel</button>` : ''}
+              <button type="button" class="btn btn-primary" id="${modalId}-btn-ok">${type === 'confirm' ? 'OK' : 'Close'}</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      const modalElement = document.getElementById(modalId);
+      const bsModal = new bootstrap.Modal(modalElement);
+      let isConfirmed = false;
+
+      document.getElementById(`${modalId}-btn-ok`).addEventListener('click', () => {
+        isConfirmed = true;
+        bsModal.hide();
+        onConfirm();
+      });
+
+      if (type === 'confirm') {
+        document.getElementById(`${modalId}-btn-cancel`).addEventListener('click', () => {
+          bsModal.hide();
+          onCancel();
+        });
+      }
+
+      modalElement.addEventListener('hidden.bs.modal', () => {
+        if (!isConfirmed && type === 'confirm') {
+          onCancel();
+        } else if (!isConfirmed && type === 'alert') {
+          onConfirm();
+        }
+        modalElement.remove();
+      });
+
+      bsModal.show();
+
+      if (timeout > 0) {
+        setTimeout(() => {
+          if (document.getElementById(modalId)) {
+            bsModal.hide();
+          }
+        }, timeout);
+      }
+    }
+
+    // Wrapper for an Alert Modal
+    function bsAlert(message,title='Departures Board',timeout=0) {
+      return new Promise(resolve => {
+        showBsModal({title,body:message,type:'alert',timeout,onConfirm:resolve,onCancel:resolve});
+      });
+    }
+
+    // Wrapper for a Confirm Modal
+    function bsConfirm(message,title=sysName,timeout=0) {
+      return new Promise((resolve) => {
+        showBsModal({
+          title,
+          body: message,
+          type: 'confirm',
+          timeout,
+          onConfirm: () => resolve(true),
+          onCancel: () => resolve(false)
+        });
+      });
+    }
+
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+</body>
+</html>

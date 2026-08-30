@@ -1,0 +1,413 @@
+/*
+ * Matrix Departures Board (c) 2026 Gadec Software
+ *
+ * TfL London Underground Client Library
+ *
+ * https://github.com/gadec-uk/matrix-departures-board
+ *
+ * This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International.
+ * To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+ */
+
+#include <TfLdataClient.h>
+#include <JsonListenerGS.h>
+#include <WiFiClientSecure.h>
+#include <cstring>
+
+TfLdataClient::TfLdataClient(busTubeStation *station, stnMessages *messages,  sharedBufferSpace *sharedBuffer) : xStation(station), xMessages(messages), js(sharedBuffer) {}
+
+int TfLdataClient::fetchArrivals(rdStation *station, stnMessages *messages, const char *locationId, const char *lineId, const char *lineDirection, bool noMessages, const char *apiKey) {
+
+    unsigned long perfTimer=millis();
+    long dataReceived = 0;
+    bool bChunked = false;
+    js->lastResultMessage[0] = '\0';
+
+    JsonStreamingParserGS parser;
+    parser.setListener(this);
+    WiFiClientSecure httpsClient;
+    httpsClient.setInsecure();
+    httpsClient.setTimeout(8000);
+    httpsClient.setConnectionTimeout(8000);
+
+    boardChanged = false;
+
+    int retryCounter=0;
+    while (!httpsClient.connect(apiHost,443) && (retryCounter++ < 15)){
+        delay(200);
+    }
+    if (retryCounter>=15) {
+        strcpy(js->lastResultMessage,"Error: Connect timed out");
+        return UPD_NO_RESPONSE;
+    }
+    String request;
+    if (strcmp(lineId,"all")) {
+        request="GET /Line/" + String(lineId) + "/Arrivals/" + String(locationId);
+        if (lineDirection[0]) request+="?direction=" + String(lineDirection) + "&app_key=" + String(apiKey) + " HTTP/1.0\r\nHost: " + String(apiHost) + "\r\nConnection: close\r\n\r\n";
+        else request+="?app_key=" + String(apiKey) + " HTTP/1.0\r\nHost: " + String(apiHost) + "\r\nConnection: close\r\n\r\n";
+    } else {
+        request="GET /StopPoint/" + String(locationId) + "/Arrivals?app_key=" + apiKey + " HTTP/1.0\r\nHost: " + String(apiHost) + "\r\nConnection: close\r\n\r\n";
+    }
+    httpsClient.print(request);
+    retryCounter=0;
+    while(!httpsClient.available() && retryCounter++ < 40) {
+        delay(250);
+    }
+
+    if (!httpsClient.available()) {
+        // no response within 8 seconds so exit
+        httpsClient.stop();
+        strcpy(js->lastResultMessage,"Error: GET timed out");
+        return UPD_TIMEOUT;
+    }
+
+    // Parse status code
+    String statusLine = httpsClient.readStringUntil('\n');
+    if (!statusLine.startsWith("HTTP/") || statusLine.indexOf("200 OK") == -1) {
+        httpsClient.stop();
+        strlcpy(js->lastResultMessage,statusLine.c_str(),sizeof(js->lastResultMessage));
+        if (statusLine.indexOf("401") > 0 || statusLine.indexOf("429") > 0) {
+            return UPD_UNAUTHORISED;
+        } else if (statusLine.indexOf("500") > 0) {
+            return UPD_DATA_ERROR;
+        } else {
+            return UPD_HTTP_ERROR;
+        }
+    }
+
+    // Skip the remaining headers
+    while (httpsClient.connected() || httpsClient.available()) {
+        statusLine = httpsClient.readStringUntil('\n');
+        if (statusLine == "\r") break;
+        if (statusLine.startsWith("Transfer-Encoding:") && statusLine.indexOf("chunked") >= 0) bChunked=true;
+    }
+
+    bool isBody = false;
+    char c;
+    id=0;
+    maxServicesRead = false;
+    fetchingArrivals = true;
+    xStation->numServices = 0;
+    xMessages->numMessages = 0;
+    for (int i=0;i<MAXBOARDMESSAGES;i++) strcpy(xMessages->messages[i],"");
+    for (int i=0;i<MAXTUBEBUSREADSERVICES;i++) {
+        strcpy(xStation->service[i].destinationName,"Check front of Train");
+        strcpy(xStation->service[i].platformDescription,"");
+        strcpy(xStation->service[i].lineId,"");
+        strcpy(xStation->service[i].serviceID,"");
+        strcpy(xStation->service[i].destinationNaptan,"");
+        strcpy(xStation->service[i].currentLocation,"");
+    }
+    unsigned long dataSendTimeout = millis() + 10000UL;
+    while((httpsClient.available() || httpsClient.connected()) && (millis() < dataSendTimeout) && (!maxServicesRead)) {
+        while(httpsClient.available() && !maxServicesRead) {
+            c = httpsClient.read();
+            dataReceived++;
+            if (c == '{' || c == '[') isBody = true;
+            if (isBody) parser.parse(c);
+        }
+        delay(5);
+    }
+    httpsClient.stop();
+    if (millis() >= dataSendTimeout) {
+        sprintf(js->lastResultMessage,"Error: Timeout after %d bytes",dataReceived);
+        return UPD_TIMEOUT;
+    }
+
+    if (!noMessages) {
+        // Update the distruption messages
+        retryCounter=0;
+        while (!httpsClient.connect(apiHost, 443) && (retryCounter++ < 15)){
+            delay(200);
+        }
+        if (retryCounter>=15) {
+            strcpy(js->lastResultMessage,"Error: Connect timed out [Msgs]");
+            return UPD_NO_RESPONSE;
+        }
+        request = "GET /StopPoint/" + String(locationId) + "/Disruption?getFamily=true&flattenResponse=true&app_key=" + String(apiKey) + " HTTP/1.0\r\nHost: " + String(apiHost) + "\r\nConnection: close\r\n\r\n";
+        httpsClient.print(request);
+        retryCounter=0;
+        while(!httpsClient.available() && retryCounter++ < 40) {
+            delay(250);
+        }
+
+        if (!httpsClient.available()) {
+            // no response within 8 seconds so exit
+            httpsClient.stop();
+            strcpy(js->lastResultMessage,"Error: GET timed out [Msgs]");
+            return UPD_TIMEOUT;
+        }
+
+        // Parse status code
+        statusLine = httpsClient.readStringUntil('\n');
+        if (!statusLine.startsWith("HTTP/") || statusLine.indexOf("200 OK") == -1) {
+            httpsClient.stop();
+            strlcpy(js->lastResultMessage,statusLine.c_str(),sizeof(js->lastResultMessage));
+            if (statusLine.indexOf("401") > 0) {
+                return UPD_UNAUTHORISED;
+            } else if (statusLine.indexOf("500") > 0) {
+                return UPD_DATA_ERROR;
+            } else {
+                return UPD_HTTP_ERROR;
+            }
+        }
+
+        // Skip the remaining headers
+        while (httpsClient.connected() || httpsClient.available()) {
+            statusLine = httpsClient.readStringUntil('\n');
+            if (statusLine == "\r") break;
+            if (statusLine.startsWith("Transfer-Encoding:") && statusLine.indexOf("chunked") >= 0) bChunked=true;
+        }
+
+        isBody = false;
+        id=0;
+        maxServicesRead = false;
+        fetchingArrivals = false;
+        parser.reset();
+
+        dataSendTimeout = millis() + 10000UL;
+        while((httpsClient.available() || httpsClient.connected()) && (millis() < dataSendTimeout) && (!maxServicesRead)) {
+            while(httpsClient.available() && !maxServicesRead) {
+                c = httpsClient.read();
+                dataReceived++;
+                if (c == '{' || c == '[') isBody = true;
+                if (isBody) parser.parse(c);
+            }
+            delay(5);
+        }
+        httpsClient.stop();
+        if (millis() >= dataSendTimeout) {
+            sprintf(js->lastResultMessage,"Error: Timeout after %d bytes [Msgs]",dataReceived);
+            return UPD_TIMEOUT;
+        }
+    }
+
+    // If the service location is "At Platform", force the timeToStation to zero
+    for (int i=0;i<xStation->numServices;++i) {
+        if (strcmp(xStation->service[i].currentLocation,"At Platform")==0) xStation->service[i].timeToStation = 0;
+    }
+
+    // Sort the services by arrival time
+    size_t arraySize = xStation->numServices;
+    std::sort(xStation->service, xStation->service+arraySize,compareTimes);
+
+    // Limit results to the nearest MAXBOARDSERVICES services
+    if (xStation->numServices > MAXBOARDSERVICES) xStation->numServices = MAXBOARDSERVICES;
+
+    // Add the attribution message
+    if (xMessages->numMessages < MAXBOARDMESSAGES) strcpy(xMessages->messages[xMessages->numMessages++],tflAttribution);
+
+    // Clean up the destinations
+    for (int i=0;i<xStation->numServices;++i) {
+        pruneFromPhrase(xStation->service[i].destinationName," Underground Station");
+        pruneFromPhrase(xStation->service[i].destinationName," DLR Station");
+        pruneFromPhrase(xStation->service[i].destinationName," (H&C Line)");
+        pruneFromPhrase(xStation->service[i].currentLocation," Platform ");
+        // Try and extract the platform number
+        const char* pos = std::strstr(xStation->service[i].platformDescription, "Platform ");
+        if (pos != nullptr) {
+            pos += strlen("Platform ");
+            if (*pos != '\0' && isdigit(*pos)) {
+                int j = 0;
+                while (isdigit(*pos) && j < 2) {
+                    xStation->service[i].platformNumber[j++] = *pos++;
+                }
+                xStation->service[i].platformNumber[j] = '\0';
+            }
+        }
+    }
+
+    // Check if any of the services have changed
+    bool secondaryChange = false;
+    if (xStation->numServices != station->numServices) boardChanged=true;
+    else if (xStation->numServices && strcmp(xStation->service[0].destinationName,station->service[0].destination)) secondaryChange = true;
+    else if (xStation->numServices && strcmp(xStation->service[0].serviceID, station->service[0].serviceId)) secondaryChange = true;
+    if (!noMessages) {
+        if (messages->numMessages != xMessages->numMessages) boardChanged = true;
+    }
+
+    // Remove line break and excess spaces from messages
+    for (int i=0;i<xMessages->numMessages;i++) {
+        replaceWord(xMessages->messages[i],"\\n"," ");
+        removeExcessSpaces(xMessages->messages[i]);
+        if (i<xMessages->numMessages-1) fixFullStop(xMessages->messages[i]);
+    }
+
+    UBaseType_t uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+    if (boardChanged) {
+        sprintf(js->lastResultMessage+strlen(js->lastResultMessage),"OK: UP D:%d T:%d S:%d %s",dataReceived,millis()-perfTimer,uxHighWaterMark,bChunked?"C!":"");
+        return UPD_SUCCESS;
+    } else if (secondaryChange) {
+        sprintf(js->lastResultMessage+strlen(js->lastResultMessage),"OK: SC D:%d T:%d S:%d %s",dataReceived,millis()-perfTimer,uxHighWaterMark,bChunked?"C!":"");
+        return UPD_SEC_CHANGE;
+    } else {
+        sprintf(js->lastResultMessage+strlen(js->lastResultMessage),"OK: NC D:%d T:%d S:%d %s",dataReceived,millis()-perfTimer,uxHighWaterMark,bChunked?"C!":"");
+        return UPD_NO_CHANGE;
+    }
+}
+
+void TfLdataClient::loadArrivals(rdStation *station, stnMessages *messages) {
+    // Update the callers data with the new data
+    station->boardChanged = boardChanged;
+    station->numServices = xStation->numServices;
+    for (int i=0;i<xStation->numServices;i++) {
+        strcpy(station->service[i].destination,xStation->service[i].destinationName);
+        strcpy(station->service[i].destinationNaptan,xStation->service[i].destinationNaptan);
+        strcpy(station->service[i].via,xStation->service[i].lineName);
+        strcpy(station->service[i].platform,xStation->service[i].platformNumber);
+        strcpy(station->service[i].lineId,xStation->service[i].lineId);
+        strcpy(station->service[i].serviceId,xStation->service[i].serviceID);
+        strcpy(station->service[i].currentLocation,xStation->service[i].currentLocation);
+        station->service[i].timeToStation = xStation->service[i].timeToStation;
+        if (strcmp(xStation->service[i].currentLocation,"At Platform")==0) station->service[i].atPlatform = true; else station->service[i].atPlatform = false;
+    }
+    //strcpy(station->origin,xStation->service[0].currentLocation);
+    messages->numMessages = xMessages->numMessages;
+    for (int i=0;i<xMessages->numMessages;i++) strcpy(messages->messages[i],xMessages->messages[i]);
+}
+
+//
+// Function to prune messages from the point at which a word or phrase is found
+//
+bool TfLdataClient::pruneFromPhrase(char* input, const char* target) {
+    // Find the first occurance of the target word or phrase
+    char* pos = strstr(input,target);
+    // If found, prune from here
+    if (pos) {
+        input[pos - input] = '\0';
+        return true;
+    }
+    return false;
+}
+
+//
+// Function to replace occurrences of a word or phrase in a character array
+//
+void TfLdataClient::replaceWord(char* input, const char* target, const char* replacement) {
+    // Find the first occurrence of the target word
+    char* pos = strstr(input, target);
+    while (pos) {
+        // Calculate the length of the target word
+        size_t targetLen = strlen(target);
+        // Calculate the length difference between target and replacement
+        int diff = strlen(replacement) - targetLen;
+
+        // Shift the remaining characters to accommodate the replacement
+        memmove(pos + strlen(replacement), pos + targetLen, strlen(pos + targetLen) + 1);
+
+        // Copy the replacement word into the position
+        memcpy(pos, replacement, strlen(replacement));
+
+        // Find the next occurrence of the target word
+        pos = strstr(pos + strlen(replacement), target);
+    }
+}
+
+//
+// Function to remove excess spaces in a character array
+//
+void TfLdataClient::removeExcessSpaces(char *input) {
+    if (input == nullptr || input[0] == '\0') return;
+
+    int i = 0;
+    int j = 0;
+    bool lastWasSpace = false;
+
+    while (input[i] != '\0') {
+        if (input[i] != ' ') {
+            input[j++] = input[i];
+            lastWasSpace = false;
+        } else {
+            if (!lastWasSpace) {
+                input[j++] = ' ';
+                lastWasSpace = true;
+            }
+        }
+        i++;
+    }
+
+    input[j] = '\0';
+}
+
+//
+// Function to ensure there's one and only one fullstop at the end of messages.
+//
+void TfLdataClient::fixFullStop(char *input) {
+    if (input[0]) {
+        while (input[0] && (input[strlen(input)-1] == '.' || input[strlen(input)-1] == ' ')) input[strlen(input)-1] = '\0'; // Remove all trailing full stops
+        if (strlen(input) < MAXMESSAGESIZE-1) strcat(input,".");  // Add a single fullstop
+    }
+}
+
+// Custom comparator function to compare time to station
+bool TfLdataClient::compareTimes(const busTubeService& a, const busTubeService& b) {
+    return a.timeToStation < b.timeToStation;
+}
+
+void TfLdataClient::whitespace(char c) {}
+
+void TfLdataClient::startDocument() {
+    js->currentPath[0] = '\0';
+    js->arrayName[0] = '\0';
+    js->objectCurrentKey[0] = '\0';
+    js->currentKey[0] = '\0';
+}
+
+void TfLdataClient::key(const char *key) {
+    strlcpy(js->currentKey,key,MAXKEYNAMESIZE);
+    if (strcmp(js->currentKey, "id")==0 && fetchingArrivals) {
+        // Next entry
+        if (xStation->numServices<MAXTUBEBUSREADSERVICES) {
+            xStation->numServices++;
+            id = xStation->numServices-1;
+        } else {
+            // We've read all we need to
+            maxServicesRead = true;
+        }
+    } else if (strcmp(js->currentKey, "description")==0 && !fetchingArrivals) {
+        // Next service message
+        if (xMessages->numMessages<MAXBOARDMESSAGES) {
+            id = xMessages->numMessages;
+            xMessages->numMessages++;
+        } else {
+            // We've read all we need to
+            maxServicesRead = true;
+        }
+    }
+}
+
+void TfLdataClient::value(const char *value) {
+    if (fetchingArrivals) {
+        if (strcmp(js->currentKey, "destinationName")==0) strlcpy(xStation->service[id].destinationName,value,MAXBUSTUBELOCATIONSIZE);
+        else if (strcmp(js->currentKey, "id")==0) strlcpy(xStation->service[id].serviceID,value,MAXSERVICEIDSIZE);
+        else if (strcmp(js->currentKey, "destinationNaptanId")==0) strlcpy(xStation->service[id].destinationNaptan,value,MAXNAPTANSIZE);
+        else if (strcmp(js->currentKey, "currentLocation")==0) strlcpy(xStation->service[id].currentLocation,value,MAXBUSTUBELOCATIONSIZE);
+        else if (strcmp(js->currentKey, "timeToStation")==0) xStation->service[id].timeToStation = atoi(value);
+        else if (strcmp(js->currentKey, "lineName")==0) strlcpy(xStation->service[id].lineName,value,MAXLINESIZE);
+        else if (strcmp(js->currentKey, "lineId")==0) strlcpy(xStation->service[id].lineId,value,MAXLINESIZE);
+        else if (strcmp(js->currentKey, "platformName")==0) strlcpy(xStation->service[id].platformDescription,value,MAXBUSTUBELOCATIONSIZE);
+    } else {
+        // Fetching messages
+        if (strcmp(js->currentKey, "description")==0) {
+            // Disruption message, check for duplicates before adding
+            for (int i=0;i<id;i++) {
+                if (strcmp(xMessages->messages[i],value)==0) {
+                    // Duplicate, don't add it
+                    xMessages->numMessages--;
+                    return;
+                }
+            }
+            strlcpy(xMessages->messages[id],value,MAXMESSAGESIZE);
+        }
+    }
+}
+
+void TfLdataClient::endArray() {}
+
+void TfLdataClient::endObject() {}
+
+void TfLdataClient::endDocument() {}
+
+void TfLdataClient::startArray() {}
+
+void TfLdataClient::startObject() {}

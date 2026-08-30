@@ -1,0 +1,12 @@
+<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>
+<html>
+<head><title>Matrix Departures Board</title></head>
+<body style="font-family:Helvetica,Arial,sans-serif">
+    <h2>Matrix Departures Board Manual Update</h2>
+    <p>Upload a <b>firmware.bin</b> file.</p>
+    <form method='POST' action='#' enctype='multipart/form-data' id='upload_form'><input type='file'
+            name='update'><input type='submit' value='Update'></form>
+    <div id='prg'>progress: 0%</div>
+    <script>$('form').submit(function (e) { e.preventDefault(); var form = $('#upload_form')[0]; var data = new FormData(form); $.ajax({ url: '/update', type: 'POST', data: data, contentType: false, processData: false, xhr: function () { var xhr = new window.XMLHttpRequest(); xhr.upload.addEventListener('progress', function (evt) { if (evt.lengthComputable) { var per = evt.loaded / evt.total; $('#prg').html('Progress: ' + Math.round(per * 100) + '%'); } }, false); return xhr; }, success: function (d, s) { console.log('success!') }, error: function (a, b, c) { } }); });</script>
+</body>
+</html>

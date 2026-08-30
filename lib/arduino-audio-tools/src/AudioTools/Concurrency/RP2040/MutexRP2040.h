@@ -1,0 +1,57 @@
+#pragma once
+//#include "AudioLogger.h"
+#include "AudioTools/Concurrency/Mutex.h"
+
+namespace audio_tools {
+
+/**
+ * @brief Disable, enable interrupts (only on the actual core)
+ * @ingroup concurrency
+ * @author Phil Schatzmann
+ * @copyright GPLv3 *
+ */
+class NoInterruptHandler : public MutexBase {
+ public:
+  void lock() override {
+    noInterrupts();
+  }
+  void unlock() override {
+    interrupts();
+  }
+};
+
+/**
+ * @brief Mutex API for non IRQ mutual exclusion between cores.
+ * Mutexes are application level locks usually used protecting data structures
+ * that might be used by multiple threads of execution. Unlike critical
+ * sections, the mutex protected code is not necessarily required/expected
+ * to complete quickly, as no other sytem wide locks are held on account of
+ * an acquired mutex.
+ * @ingroup concurrency
+ * @author Phil Schatzmann
+ * @copyright GPLv3 
+ */
+
+class MutexRP2040 : public MutexBase {
+ public:
+  MutexRP2040() {
+    mutex_init(&mtx);
+  }
+  virtual ~MutexRP2040() = default;
+
+  void lock() override {
+    mutex_enter_blocking(&mtx);
+  }
+  void unlock() override {
+    mutex_exit(&mtx);
+  }
+
+ protected:
+  mutex_t mtx;
+};
+
+/// @brief Default Mutex implementation using RP2040 Pico SDK
+/// @ingroup concurrency
+using Mutex = MutexRP2040;
+
+}  // namespace audio_tools
