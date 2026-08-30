@@ -2,9 +2,9 @@
 
 This is a LED Matrix Departures Board replicating those at many UK railway stations (using data provided by National Rail's public API), London Underground Arrivals boards (using data provided by TfL) and UK wide bus stops (using data provided by bustimes.org). This implementation uses a [Waveshare ESP32-S3 RGB Matrix Driver Board](https://www.waveshare.com/esp32-s3-rgb-matrix.htm) together with three 64x32 LED Matrix HUB75 panels. Two speech-packs are included (male and female) providing station announcements for all National Rail and Tube stations.
 
-<img src="https://github.com/user-attachments/assets/66024cae-735f-414e-b9fa-fce05880a275" align="center">
+<img src="https://github.com/user-attachments/assets/751090fc-2bf5-4157-8e45-4f9fe757c80f" align="center">
 
-A table-top version using a 3.12" OLED panel  is also available [here](https://github.com/gadec-uk/departures-board).
+A table-top version using a 3.12" OLED panel is also available [here](https://github.com/gadec-uk/departures-board).
 
 ## Features
 * All processing is done onboard by the ESP32-S3 processor, no middleware servers.
@@ -30,10 +30,11 @@ A table-top version using a 3.12" OLED panel  is also available [here](https://g
 * Displays the weather at the selected location (optional).
 * Full-screen, Network SouthEast style station clock (optional).
 
-<img src="https://github.com/user-attachments/assets/82a8ae99-b51c-4926-8706-87ca56c11355" align="center">
+![image](https://github.com/user-attachments/assets/ca2b163d-8218-4d8e-8340-42d449b41138)
 
 You can see the board in action in the demonstration video below:
-[![Departures Board Demo Video](https://github.com/user-attachments/assets/a37948cc-3738-4a78-9c99-a0b6de119883)](https://youtu.be/gavZ2IEgk8E)
+
+[![Departures Board Demo Video](https://github.com/user-attachments/assets/ec6a6bbc-593f-402a-b78c-1b2cfda15c2d)](https://youtu.be/gavZ2IEgk8E)
 
 ## Quick Start
 
@@ -49,7 +50,7 @@ You can see the board in action in the demonstration video below:
 
 A step-by-step guide to obtaining the API keys is available [here](https://matrix-departures-board.github.io/Departures-Board-API-Keys-Guide.pdf).
 
-<img src="https://github.com/user-attachments/assets/d2c8f0cc-3de5-4c59-a237-00fb096be31d" align="center">
+<img src="https://github.com/user-attachments/assets/121c0755-f965-45cd-9b9a-40cee435e83f" align="center">
 
 ### Assembly
 
