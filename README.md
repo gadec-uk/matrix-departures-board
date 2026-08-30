@@ -2,7 +2,7 @@
 
 This is a LED Matrix Departures Board replicating those at many UK railway stations (using data provided by National Rail's public API), London Underground Arrivals boards (using data provided by TfL) and UK wide bus stops (using data provided by bustimes.org). This implementation uses a [Waveshare ESP32-S3 RGB Matrix Driver Board](https://www.waveshare.com/esp32-s3-rgb-matrix.htm) together with three 64x32 LED Matrix HUB75 panels. Two speech-packs are included (male and female) providing station announcements for all National Rail and Tube stations.
 
-<img src="https://github.com/user-attachments/assets/751090fc-2bf5-4157-8e45-4f9fe757c80f" align="center">
+<img src="https://github.com/user-attachments/assets/751090fc-2bf5-4157-8e45-4f9fe757c80f" style="display:block; margin:0 auto;">
 
 A table-top version using a 3.12" OLED panel is also available [here](https://github.com/gadec-uk/departures-board).
 
@@ -50,7 +50,7 @@ You can see the board in action in the demonstration video below:
 
 A step-by-step guide to obtaining the API keys is available [here](https://matrix-departures-board.github.io/Departures-Board-API-Keys-Guide.pdf).
 
-<img src="https://github.com/user-attachments/assets/121c0755-f965-45cd-9b9a-40cee435e83f" align="center">
+<img src="https://github.com/user-attachments/assets/121c0755-f965-45cd-9b9a-40cee435e83f" style="display:block; margin:0 auto;">
 
 ### Assembly
 
@@ -184,7 +184,7 @@ A few other urls have been implemented, primarily for debugging/developer use:
 ### Bus Stop ATCO codes
 Every UK bus stop has a unique ATCO code number. To find the ATCO code of the stop you want to monitor, go to [bustimes.org/search](https://bustimes.org/search) and type a location in the search box. Select the location from the list of places shown and then select the particular stop you want from the list. The ATCO code is shown on the stop information page. After entering the code in the Departures Board setup screen, tap the **Verify** button and the location will be shown confirming your selection. You must use the **Verify** button *before* you can save changes. Up to ten of the most recently verified ATCO codes are saved and can be selected from a dropdown list for quick access. The bustimes map and search facility are also embedded in the Bus mode configuration screen from firmware B2.3 onwards.
 
-<img src="https://github.com/user-attachments/assets/8a41ec6d-5f15-4102-b3d5-c09260986319" align="center">
+<img src="https://github.com/user-attachments/assets/8a41ec6d-5f15-4102-b3d5-c09260986319" style="display:block; margin:0 auto;">
 
 ### Custom Time Zones
 To set a custom time zone for the departure board clock, you will need to enter the POSIX time zone string for your location. Some examples are `CST6CDT,M3.2.0/2,M11.1.0/2` for Canada (Central Time) and `AEST-10AEDT,M10.1.0,M4.1.0/3` for Australia (Eastern Time). The easiest way to find the correct syntax is to ask your favourite AI chat engine *"What is the POSIX time zone string for ..."*. Note that changing the time zone only affects the clock (and date) display. Service times are *always* shown in UK time.
@@ -196,7 +196,7 @@ Additional speech-packs can be added to the card. You must follow the same file 
 
 ### Donating
 
-<a href="https://buymeacoffee.com/gadec.uk"><img src="https://github.com/user-attachments/assets/e5960046-051a-45af-8730-e23d4725ab53" align="left" width="160" style="margin-right: 15px;" /></a>
+<a href="https://buymeacoffee.com/gadec.uk"><img src="https://github.com/user-attachments/assets/e5960046-051a-45af-8730-e23d4725ab53" width="160" style="float:left; margin-right: 15px;" /></a>
 This software is completely free for non-commercial use without obligation. If you would like to support me and encourage ongoing updates, you can [buy me a coffee!](https://buymeacoffee.com/gadec.uk)
 
 ### Licence
