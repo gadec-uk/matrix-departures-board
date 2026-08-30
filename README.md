@@ -196,7 +196,7 @@ Additional speech-packs can be added to the card. You must follow the same file 
 
 ### Donating
 
-<a href="https://buymeacoffee.com/gadec.uk"><img src="https://github.com/user-attachments/assets/e5960046-051a-45af-8730-e23d4725ab53" width="160" style="float:left; margin-right: 15px;" /></a>
+<a href="https://buymeacoffee.com/gadec.uk"><img src="https://github.com/user-attachments/assets/e5960046-051a-45af-8730-e23d4725ab53" width="160" style="display:inline-block; vertical-align:top; margin-right: 15px;" /></a>
 This software is completely free for non-commercial use without obligation. If you would like to support me and encourage ongoing updates, you can [buy me a coffee!](https://buymeacoffee.com/gadec.uk)
 
 ### Licence
