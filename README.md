@@ -100,7 +100,7 @@ Subsequent updates can be carried out automatically over-the-air or you can manu
 
 ### First time configuration
 
-WiFiManager is used to setup the initial WiFi connection on first boot. The ESP32 will broadcast a temporary WiFi network named "Departures Board", connect to the network and follow the on-screen instuctions.
+WiFiManager is used to setup the initial WiFi connection on first boot. The ESP32 will broadcast a temporary WiFi network named "Departures Board", connect to the network and follow the on-screen instructions.
 
 Once the ESP32 has established an Internet connection, the next step is to enter your API keys (if you do not enter a Rail Delivery Group API key or National Rail token, the board will only operate in Tube and Bus modes). Finally, select a station location. Start typing the location name and valid choices will be displayed as you type.
 
@@ -118,7 +118,7 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 - **Filter by Direction** - select the desired direction or any direction for all arrivals.
 - **Bus Stop ATCO code** - type the ATCO number of the bus stop you want to monitor (see [below](#bus-stop-atco-codes) for details).
 - **Only show these Bus services** - filter buses by service numbers (enter a list of the service numbers, comma separated).
-- **Recently verfied ATCO codes** - quickly select from recently used bus stop ATCO codes.
+- **Recently verified ATCO codes** - quickly select from recently used bus stop ATCO codes.
 #### Options tab ####
 - **Brightness** - adjusts the brightness of the LED matrix panels.
 - **Show current location name** - displays the currently selected station or bus stop name in the cycle of services, following the clock.
@@ -200,4 +200,4 @@ Additional speech-packs can be added to the card. You must follow the same file 
 This software is completely free for non-commercial use without obligation. If you would like to support me and encourage ongoing updates, you can [buy me a coffee!](https://buymeacoffee.com/gadec.uk)
 
 ### Licence
-This work is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0**. To view a copy of this licence, visit [https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/). Note: the terms of the licence prohibit commericial use of this work, this includes *any* reselling of the work in kit or assembled form for commercial gain.
+This work is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 4.0**. To view a copy of this licence, visit [https://creativecommons.org/licenses/by-nc-sa/4.0/](https://creativecommons.org/licenses/by-nc-sa/4.0/). Note: the terms of the licence prohibit commercial use of this work, this includes *any* reselling of the work in kit or assembled form for commercial gain.
