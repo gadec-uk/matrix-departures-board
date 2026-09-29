@@ -56,7 +56,7 @@ A step-by-step guide to obtaining the API keys is available [here](https://matri
 
 Format the micro-SD card as FAT32 and copy all of the [speech-pack](https://github.com/gadec-uk/matrix-departures-board/tree/main/speech-packs) files to the root of the card, retaining the folder structure (the root folder should contain only the V1 and V2 folders). Insert the card into the slot on the processor board and attach the supplied speaker.
 
-The processor board is plugged into the first panel's HUB75 "in" socket, the "out" socket is connected to the next panel's "in" socket and the "out" socket of that panel is connected to the "in" socket of the third panel (using the ribbon cables provided with the panels). Separate power cables must be connected for each panel, fed from the power output (screw terminals) on the processor board.
+The processor board is plugged into the first panel's HUB75 "in" socket, the "out" socket is connected to the next panel's "in" socket and the "out" socket of that panel is connected to the "in" socket of the third panel (using the ribbon cables provided with the panels). Separate power cables must be connected for each panel, all three fed from the power output (screw terminals) on the processor board. If the processor board does not fit snugly to the first panel, or if it overhangs the edge of panel causing an issue with your case design, you can add an extension cable between the board and the panel - for example, from [AliExpress](https://www.aliexpress.com/item/1005006111139993.html).
 
 If using the optional touch-sensor, use the cable provided with the processor board to connect as follows:
 
