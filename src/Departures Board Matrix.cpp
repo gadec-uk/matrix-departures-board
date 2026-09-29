@@ -1128,7 +1128,6 @@ void showFirmwareUpdateWarningScreen(const char *msg) {
 }
 
 void showFirmwareUpdateProgress(int percent) {
-  //clearCanvas();
   centreText("* DO NOT REMOVE THE POWER *",LINE3+1,RGB565_RED,RAIL9,u8g2_main);
   sendBuffer();
   progressBar("Updating Firmware",percent);
@@ -2998,7 +2997,7 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
     if (station->platformAvailable && station->service[0].platform[0] && (isdigit(station->service[0].platform[0]) || (station->service[0].platform[0] >= 'A' && station->service[0].platform[0] <= 'D')) && strcmp(station->service[0].platform,"BUS")) {
       // "The next train departing from platform "
       result = result && addAudioToQueue(announcer, "AN/D", checkPath);
-      // "##"
+      // ##
       sprintf(speechFile,"NU/%s",station->service[0].platform);
       result = result && addAudioToQueue(announcer, speechFile, checkPath);
       // "will be the"
@@ -3874,15 +3873,17 @@ void AudioTask(void *pvParameters) {
             }
         }
 
-        // Actively playing
-        size_t bytesCopied = copier.copy();
+        if (wavFile) {
+          // Actively playing
+          size_t bytesCopied = copier.copy();
 
-        // EOF detection
-        if (!wavFile.available() && !bytesCopied) {
-            i2s.flush();
-            i2s.writeSilence(256);
-            wavFile.close();
-            decoderStream.end();
+          // EOF detection
+          if (!wavFile.available() && !bytesCopied) {
+              i2s.flush();
+              i2s.writeSilence(256);
+              wavFile.close();
+              decoderStream.end();
+          }
         }
 
         taskYIELD();
