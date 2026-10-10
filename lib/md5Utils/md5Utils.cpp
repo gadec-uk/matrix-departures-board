@@ -1,7 +1,7 @@
 /*
  * Matrix Departures Board (c) 2026 Gadec Software
  *
- * MD5 Utilities Library - calculate the MD5 hash of a file on the LittleFS file system. Convert a base64 MD5 hash to Hex.
+ * MD5 Utilities Library - calculate the MD5 hash of a file on the file system. Convert a base64 MD5 hash to Hex.
  *
  * https://github.com/gadec-uk/matrix-departures-board
  *
@@ -10,13 +10,14 @@
  */
 
 #include <md5Utils.h>
+#include <FS.h>
 #include <LittleFS.h>
 #include <mbedtls/md5.h>
 
 md5Utils::md5Utils() {}
 
-String md5Utils::calculateFileMD5(const char* filePath) {
-  File file = LittleFS.open(filePath, "r");
+String md5Utils::calculateFileMD5(const char* filePath, fs::FS &fs) {
+  File file = fs.open(filePath, "r");
   if (!file || file.isDirectory()) {
     return String();  // Return empty result if failure
   }

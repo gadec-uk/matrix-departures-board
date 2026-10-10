@@ -30,18 +30,33 @@ void touchSensor::updateTouchState() {
         touchStartedMs = millis();
         shortTapDetected = false;
         longTapDetected = false;
+        doubleTapDetected = false;
       } else {
         unsigned long touchLengthMs = millis()-touchStartedMs;
         if (touchLengthMs < longTapMs) {
-          shortTapDetected = true;
-          lastTapTime = millis();
+          if (waitingForDoubleTap && ((millis() - firstTapEndTimeMs) < doubleTapWindowMs)) {
+            doubleTapDetected = true;
+            waitingForDoubleTap = false;
+            lastTapTime = millis();
+          } else {
+            waitingForDoubleTap = true;
+            firstTapEndTimeMs = millis();
+          }
         } else {
           longTapDetected = true;
+          waitingForDoubleTap = false;
           lastTapTime = millis();
         }
       }
     }
   }
+
+  if (waitingForDoubleTap && ((millis() - firstTapEndTimeMs) >= doubleTapWindowMs)) {
+    shortTapDetected = true;
+    waitingForDoubleTap = false;
+    lastTapTime = firstTapEndTimeMs;
+  }
+
   lastState = state;
 }
 
@@ -63,6 +78,13 @@ bool touchSensor::wasLongTapped() {
   } else return false;
 }
 
+bool touchSensor::wasDoubleTapped() {
+  if (doubleTapDetected) {
+    doubleTapDetected = false;
+    return true;
+  } else return false;
+}
+
 int touchSensor::secsSinceLastTap() {
   return ((millis()-lastTapTime)/1000);
 }
@@ -73,4 +95,8 @@ void touchSensor::setLongTapTime(unsigned long ms) {
 
 void touchSensor::setDebounceTime(unsigned long ms) {
   debounceDelay = ms;
+}
+
+void touchSensor::setDoubleTapWindow(unsigned long ms) {
+  doubleTapWindowMs = ms;
 }

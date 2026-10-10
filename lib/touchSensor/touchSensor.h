@@ -18,11 +18,15 @@ class touchSensor {
     bool lastState = LOW;
     bool currentState = LOW;
     unsigned long lastDebounceMs = 0;
-    unsigned long debounceDelay = 80;
-    unsigned long touchStartedMs = false;
+    unsigned long debounceDelay = 20;
+    unsigned long touchStartedMs = 0;
     bool shortTapDetected = false;
     bool longTapDetected = false;
+    bool doubleTapDetected = false;
+    bool waitingForDoubleTap = false;
     unsigned long longTapMs = 800;
+    unsigned long doubleTapWindowMs = 400;
+    unsigned long firstTapEndTimeMs = 0;
     unsigned long lastTapTime = 0;
 
   public:
@@ -31,7 +35,9 @@ class touchSensor {
     bool isTouched();
     bool wasShortTapped();
     bool wasLongTapped();
+    bool wasDoubleTapped();
     int secsSinceLastTap();
     void setLongTapTime(unsigned long ms);
     void setDebounceTime(unsigned long ms);
+    void setDoubleTapWindow(unsigned long ms);
 };

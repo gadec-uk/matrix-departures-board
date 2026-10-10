@@ -30,7 +30,6 @@ int weatherClient::updateWeather(const char *apiKey, float lat, float lon) {
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
 
     // Which client are we using
     weatherSource = (apiKey[0]?OPENWEATHERMAP:OPENMETEO);

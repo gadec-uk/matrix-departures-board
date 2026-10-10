@@ -325,6 +325,9 @@ int rdmRailClient::fetchDepartures(rdStation *station, stnMessages *messages, co
     xMessages->numMessages=0;
     xStation->platformAvailable=false;
     addedStopLocation = false;
+    numStoppingPoints = 0;
+    endCAL = nullptr;
+    endCALcrs = nullptr;
 
     strcpy(xStation->location,"");
 
@@ -358,7 +361,7 @@ int rdmRailClient::fetchDepartures(rdStation *station, stnMessages *messages, co
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
+
     int retryCounter=0; //retry counter
     while((!httpsClient.connect(rdmHost, 443)) && (retryCounter < 10)) {
         delay(100);
@@ -613,7 +616,6 @@ int rdmRailClient::getServiceDetails(const char *serviceID, String apiToken) {
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
 
     int retryCounter=0; //retry counter
     while((!httpsClient.connect(rdmHost, 443)) && (retryCounter < 10)) {
@@ -881,6 +883,7 @@ void rdmRailClient::value(const char *value) {
                 }
                 strcat(xStation->service[id].calling,value);
                 addedStopLocation = true;
+                numStoppingPoints++;
             }
             return;
         } else if (strcmp(js->currentKey, "crs")==0 && inCallingArray == 1 && addedStopLocation) {
@@ -902,6 +905,7 @@ void rdmRailClient::value(const char *value) {
                 // remove this calling point, it's cancelled
                 *endCAL = '\0';
                 *endCALcrs = '\0';
+                numStoppingPoints--;
             }
             addedStopLocation = false;
             return;
@@ -988,11 +992,22 @@ void rdmRailClient::value(const char *value) {
                     xStation->service[id].isDelayed=false;
                 } else {
                     if (xStation->service[id].trainLength == 0) xStation->service[id].trainLength = coaches;
+                    // If there are multiple stopping points, insert the "and" prior to the final destination
+                    if (numStoppingPoints>1 && endCAL != nullptr && strlen(xStation->service[id].calling) + 4 < sizeof(xStation->service[0].calling)) {
+                        size_t tailLen = strlen(endCAL + 2) + 1;
+                        memmove(endCAL + 5, endCAL + 2, tailLen);
+                        memcpy(endCAL, " and ", 5);
+                    } else if (numStoppingPoints==1 && strlen(xStation->service[id].calling) + 5 < sizeof(xStation->service[0].calling)) {
+                        strcat(xStation->service[id].calling, " only");
+                    }
                     xStation->numServices++;
                     id++;
                 }
                 coaches=0;
+                numStoppingPoints=0;
                 keepRoute = false;
+                endCAL = nullptr;
+                endCALcrs = nullptr;
             }
             return;
         } else if (strcmp(js->currentPath, "/locationName")==0) {

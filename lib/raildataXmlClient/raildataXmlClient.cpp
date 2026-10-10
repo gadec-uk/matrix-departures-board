@@ -49,7 +49,6 @@ int raildataXmlClient::init(const char *wsdlHost, const char *wsdlAPI)
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
 
     int retryCounter=0; //retry counter
     while((!httpsClient.connect(wsdlHost, 443)) && (retryCounter < 10)){
@@ -420,6 +419,9 @@ int raildataXmlClient::fetchDepartures(rdStation *station, stnMessages *messages
     xMessages->numMessages=0;
     xStation->platformAvailable=false;
     addedStopLocation = false;
+    numStoppingPoints = 0;
+    endCAL = nullptr;
+    endCALcrs = nullptr;
     strcpy(xStation->location,"");
 
     for (int i=0;i<MAXBOARDSERVICES;++i) {
@@ -453,7 +455,6 @@ int raildataXmlClient::fetchDepartures(rdStation *station, stnMessages *messages
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
 
     int retryCounter=0; //retry counter
     while((!httpsClient.connect(soapHost, 443)) && (retryCounter < 10)) {
@@ -552,7 +553,7 @@ int raildataXmlClient::fetchDepartures(rdStation *station, stnMessages *messages
 
     httpsClient.stop();
     if (millis() >= dataSendTimeout) {
-        sprintf(js->lastResultMessage,"Error: Timeout after %d bytes",dataReceived);
+        sprintf(js->lastResultMessage,"Error: Timeout after %d bytes [%d svcs]",dataReceived,xStation->numServices);
         return UPD_TIMEOUT;
     }
 
@@ -562,7 +563,16 @@ int raildataXmlClient::fetchDepartures(rdStation *station, stnMessages *messages
         return UPD_DATA_ERROR;
     }
     if (filterPlatforms && !keepRoute && xStation->numServices) xStation->numServices--;   // Last route added needs filtering out
-
+    else {
+        // If there are multiple stopping points, insert the "and" prior to the final destination
+        if (numStoppingPoints>1 && endCAL != nullptr && strlen(xStation->service[xStation->numServices-1].calling) + 4 < sizeof(xStation->service[0].calling)) {
+            size_t tailLen = strlen(endCAL + 2) + 1;
+            memmove(endCAL + 5, endCAL + 2, tailLen);
+            memcpy(endCAL, " and ", 5);
+        } else if (numStoppingPoints==1 && strlen(xStation->service[id].calling) + 5 < sizeof(xStation->service[0].calling)) {
+            strcat(xStation->service[id].calling, " only");
+        }
+    }
     if (!includeBusServices) {
         // Go through and delete any bus services
         int i=0;
@@ -728,7 +738,6 @@ int raildataXmlClient::getServiceDetails(const char *serviceID, const char *cust
     httpsClient.setInsecure();
     httpsClient.setTimeout(8000);
     httpsClient.setConnectionTimeout(8000);
-    httpsClient.setNoDelay(false);
 
     int retryCounter=0; //retry counter
     while((!httpsClient.connect(soapHost, 443)) && (retryCounter < 10)) {
@@ -1023,6 +1032,7 @@ void raildataXmlClient::value(const char *value)
                 }
                 strcat(xStation->service[id].calling,value);
                 addedStopLocation = true;
+                numStoppingPoints++;
             }
             return;
         } else if (tagLevel == 11 && tagPath.endsWith("callingPoint/lt8:crs")) {
@@ -1045,6 +1055,7 @@ void raildataXmlClient::value(const char *value)
                 // remove this calling point, it's cancelled
                 *endCAL = '\0';
                 *endCALcrs = '\0';
+                numStoppingPoints--;
             }
             addedStopLocation = false;
             return;
@@ -1105,8 +1116,21 @@ void raildataXmlClient::value(const char *value)
                 xStation->service[id].isDelayed=false;
                 xStation->numServices--;
                 id--;
+            } else {
+                // If there are multiple stopping points, insert the "and" prior to the final destination
+                if (numStoppingPoints>1 && endCAL != nullptr && id>=0 && strlen(xStation->service[id].calling) + 4 < sizeof(xStation->service[0].calling)) {
+                    size_t tailLen = strlen(endCAL + 2) + 1;
+                    memmove(endCAL + 5, endCAL + 2, tailLen);
+                    memcpy(endCAL, " and ", 5);
+                    endCAL = nullptr;
+                } else if (numStoppingPoints==1 && strlen(xStation->service[id].calling) + 5 < sizeof(xStation->service[0].calling)) {
+                    strcat(xStation->service[id].calling, " only");
+                }
             }
             keepRoute = false;  // reset for next route
+            endCAL = nullptr;
+            endCALcrs = nullptr;
+            numStoppingPoints = 0;
             if (id>=0) {
                 if (xStation->service[id].trainLength == 0) xStation->service[id].trainLength = coaches;
             }

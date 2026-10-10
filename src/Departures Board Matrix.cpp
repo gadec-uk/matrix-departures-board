@@ -234,6 +234,12 @@ github* ghUpdate = nullptr;
 
 static char* weatherMsg = nullptr;         // Weather message (will be in PSRAM)
 
+#define MAX_SP_PATH_SIZE 48                // Max length of a speech pack path on SD card
+struct ManifestEntry {                     // stores entry from manifest.lst
+  char path[MAX_SP_PATH_SIZE];
+  char hash[33];
+};
+
 // Bit and bobs
 static unsigned long timer = 0;
 static bool isSleeping = false;            // Is the screen sleeping (showing the "screensaver")
@@ -242,19 +248,26 @@ static bool forcedSleep = false;           // Is the system in manual sleep mode
 static bool forcedAwake = false;           // Was the system woken by touch sensor?
 static int stayAwakeSeconds = 300;         // How long to force stay awake since last tap
 static bool useNSEclockForSleep = false;   // Use the large NSE clock in "sleep" mode?
-static bool longPressClock = false;        // Long press switches to NSE clock mode
+static byte longPressAction = 0;           // Long press setting
+static byte doublePressAction = 0;         // Double press setting
 static bool showClockNoServices = false;   // Show the NSE clock when no train services at location
 static bool noServiceClockIsActive = false;// NSE clock is active due to no services at location
 static bool NSEclockIsActive = false;      // Is the large NSE clock active
 static bool softResetNeeded = false;       // Is a soft reset pending?
 static bool manualUpdateCheck = false;     // Has the GUI requested a firmware update check
+static bool manualSpeechPackCheck = false; // Has the GUI requested a speech pack update check
 static bool weatherEnabled = false;        // Showing weather at station location.
 static bool enableBus = false;             // Include Bus services on the board?
 static bool firmwareUpdates = false;       // Check for and install firmware updates automatically at boot?
 static bool dailyUpdateCheck = false;      // Check for and install firmware updates at midnight?
-static byte sleepStarts = 0;               // Hour at which the overnight sleep (screensaver) begins
-static byte sleepEnds = 6;                 // Hour at which the overnight sleep (screensaver) ends
-static int brightness = 20;                // Initial brightness level of the panels
+static bool speechPackUpdates = true;      // Check for and install speech pack updates automatically at boot?
+static int dayTime = 480;                  // Time (in minutes) at which day time begins
+static int nightTime = 1320;               // Time (in minutes) at which night time begins
+static bool isNightTime = false;           // Is is night time now?
+static int sleepStarts = 1380;             // Time (in minutes) at which the overnight sleep (screensaver) begins
+static int sleepEnds = 360;                // Time (in minutes) at which the overnight sleep (screensaver) ends
+static int brightness = 20;                // Day time brightness level of the panels
+static int brightnessNight = 20;           // Night time brightness level of the panels
 static unsigned long lastWiFiReconnect=0;  // Last WiFi reconnection time (millis)
 static bool firstLoad = true;              // Are we loading for the first time (no station config)?
 static int prevProgressBarPosition=0;      // Used for progress bar smooth animation
@@ -290,13 +303,18 @@ static bool touchEnabled = false;          // TTP223 Touch Sensor enabled?
 static bool useRDMclient = false;          // Use the new Rail Data Marketplace API instead of Darwin Lite
 static bool enableScheduler = false;       // Scheduler mode is active
 static bool enableCarousel = false;        // Carousel mode is active
+static int maxRailServices = MAXBOARDSERVICES; // Allows user override of number of service to show
 static bool cardReaderReady = false;       // Is the SD card reader ready with a card installed?
 static bool enableFTP = false;             // Should we enable the FTP server
+static bool ftpRunning = false;            // Was the FTP server started?
+static bool audioInitialised = false;      // Was the audio system setup OK?
 static bool enableAudioAnnouncements = false;  // Audio announcements are active
 static bool enableAudioCallingList = true; // Announce the "calling at" stations list
 static bool enableReverb = true;           // Add the station reverb effect into the audio pipeline
-static int audioVolume = 160;              // Audio volume
+static int audioVolume = 160;              // Day time audio volume
+static int audioVolumeNight = 160;         // Night time audio volume
 static char audioVoice[6] = "/V1";         // Selected audio announcer speechpack
+static bool audioMuted = false;            // Has the user muted the audio
 static uint8_t cardType = 100;             // SD card type (for info)
 static int numCarouselSlots = 0;
 static int currentCarouselSlot = 0;
@@ -534,7 +552,7 @@ bool setupAudioSystem() {
 //
 bool addAudioToQueue(const char *announcer, const char *audioFilename, bool verifyOnly, uint16_t delay = 0) {
 
-  if (!enableAudioAnnouncements) return false;
+  if (!audioInitialised || !enableAudioAnnouncements) return false;
 
   if (strcmp(audioFilename,"SN/?/???") == 0) return true; // Sometimes NR return ??? as CRS code, ignore these
 
@@ -548,11 +566,7 @@ bool addAudioToQueue(const char *announcer, const char *audioFilename, bool veri
     if (SD_MMC.exists(cmd.filename)) {
       return true;
     } else {
-      log_e("Audio file '%s' not found. Calling list saved to LittleFS",cmd.filename);
-      strlcpy(missingFile,audioFilename,sizeof(missingFile));
-      for (int i=0;i<strlen(missingFile);++i) if (missingFile[i]=='/') missingFile[i]='~';  // replace / in path
-      String logFilename = "/" + String(missingFile) + ".txt";
-      if (!LittleFS.exists(logFilename)) saveFile(logFilename, String(station->calling)+"\n\r"+String(station->callingCrs));
+      log_e("Audio file '%s' not found.",cmd.filename);
       return false;
     }
   } else {
@@ -572,20 +586,23 @@ bool addNumberToAudioQueue(const char *announcer, int num, bool checkPath, uint1
   char digits[3];
   bool result;
 
-  if (!enableAudioAnnouncements) return false;
+  if (!audioInitialised || !enableAudioAnnouncements) return false;
 
-  if (num<0 || num>99) return false;
+  if (num<0 || num>100) return false;
 
   if (num<60) {
     // number
     if (num==0) strcpy(speechFile,"NU/ZO"); // "zero"
     else sprintf(speechFile,"NU/%d",num);
     result = addAudioToQueue(announcer, speechFile, checkPath, delay);
+  } else if (num==100) {
+    result = addAudioToQueue(announcer, "NU/1", checkPath, delay);
+    result = result && addAudioToQueue(announcer, "NU/00", checkPath, delay);
   } else {
-    // "20,30,40,50"
+    // "70,80,90"
     sprintf(digits,"%02d",num);
     sprintf(speechFile,"NU/%c0",digits[0]);
-    result = result && addAudioToQueue(announcer, speechFile, checkPath, delay);
+    result = addAudioToQueue(announcer, speechFile, checkPath, delay);
     if (digits[1] != '0') {
       sprintf(speechFile,"NU/%c",digits[1]);
       result = result && addAudioToQueue(announcer, speechFile, checkPath, delay);
@@ -1279,11 +1296,34 @@ bool isSnoozing() {
     else return false;
   }
   if (!sleepEnabled) return false;
-  byte myHour = timeinfo.tm_hour;
+
+  int myTime = (timeinfo.tm_hour * 60) + timeinfo.tm_min;
   if (sleepStarts > sleepEnds) {
-    if ((myHour >= sleepStarts) || (myHour < sleepEnds)) return true; else return false;
+    if ((myTime >= sleepStarts) || (myTime < sleepEnds)) return true; else return false;
   } else {
-    if ((myHour >= sleepStarts) && (myHour < sleepEnds)) return true; else return false;
+    if ((myTime >= sleepStarts) && (myTime < sleepEnds)) return true; else return false;
+  }
+}
+
+// Returns true if it's night time
+bool isItNightTime() {
+  int myTime = (timeinfo.tm_hour * 60) + timeinfo.tm_min;
+  if (nightTime > dayTime) {
+    if ((myTime >= nightTime) || (myTime < dayTime)) return true; else return false;
+  } else {
+    if ((myTime >= nightTime) && (myTime < dayTime)) return true; else return false;
+  }
+}
+
+void configDayNight() {
+  if (isNightTime) {
+    if (audioInitialised) es.WriteReg(0x32,audioVolumeNight);
+    dma_display->setBrightness(brightnessNight);
+    restartTimer.once(1, []() { dma_display->setBrightness(brightnessNight); });
+  } else {
+    if (audioInitialised) es.WriteReg(0x32,audioVolume);
+    dma_display->setBrightness(brightness);
+    restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
   }
 }
 
@@ -1348,7 +1388,7 @@ void saveFirmwareInfo() {
 
 // Write a default config file so that the Web GUI works initially (force Tube mode if no NR token)
 void writeDefaultConfig() {
-  String defaultConfig = "{\"crs\":\"\",\"station\":\"\",\"lat\":0,\"lon\":0,\"weather\":true,\"sleep\":false,\"showBus\":false,\"update\":true,\"sleepStarts\":23,\"sleepEnds\":8,\"brightness\":20,\"volume\":152,\"theme\":\"ct_Default\",\"fastRefresh\":true,\"tubeId\":\"\",\"tubeName\":\"\",\"mode\":" + String((!nrToken[0] && rdmDeparturesApiKey=="")?"1":"0") + "}";
+  String defaultConfig = "{\"crs\":\"\",\"station\":\"\",\"lat\":0,\"lon\":0,\"weather\":true,\"sleep\":false,\"showBus\":false,\"update\":true,\"sleepStarts\":\"23:00\",\"sleepEnds\":\"08:00\",\"brightness\":20,\"volume\":152,\"theme\":\"ct_Default\",\"fastRefresh\":true,\"tubeId\":\"\",\"tubeName\":\"\",\"mode\":" + String((!nrToken[0] && rdmDeparturesApiKey=="")?"1":"0") + "}";
   saveFile("/config.json",defaultConfig);
   resetLocationIds();
   saveFirmwareInfo();
@@ -1440,6 +1480,7 @@ void loadSlot(JsonObjectConst slot, bool isDefault, boardModes requestedMode) {
 // Load the configuration settings (if they exist, if not create a default set for the Web GUI page to read)
 void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFIG) {
   JsonDocument doc;
+  int h, m;
 
   // Set defaults
   strcpy(hostname,defaultHostname);
@@ -1468,11 +1509,12 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["hostname"].is<const char*>())   strlcpy(hostname, settings["hostname"], sizeof(hostname));
         if (settings["wsdlHost"].is<const char*>())   strlcpy(wsdlHost, settings["wsdlHost"], sizeof(wsdlHost));
         if (settings["wsdlAPI"].is<const char*>())    strlcpy(wsdlAPI, settings["wsdlAPI"], sizeof(wsdlAPI));
-        if (settings["enableAudio"].is<bool>())       enableAudioAnnouncements = settings["enableAudio"];
+        if (settings["enableAudio"].is<bool>())       enableAudioAnnouncements = (settings["enableAudio"] && cardReaderReady);
         if (settings["enableReverb"].is<bool>())      enableReverb = settings["enableReverb"];
         if (settings["enableAudioCalling"].is<bool>()) enableAudioCallingList = settings["enableAudioCalling"];
         if (settings["voice"].is<const char*>())      strlcpy(audioVoice, settings["voice"], sizeof(audioVoice));
         if (settings["volume"].is<int>())             audioVolume = settings["volume"];
+        if (settings["volumeNight"].is<int>())        audioVolumeNight = settings["volumeNight"];
         if (settings["showBus"].is<bool>())           enableBus = settings["showBus"];
         if (settings["showLocation"].is<bool>())      showStationName = settings["showLocation"];
         if (settings["showFullCalling"].is<bool>())   showFullCalling = settings["showFullCalling"];
@@ -1483,17 +1525,22 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["weather"].is<bool>())           weatherEnabled = settings["weather"];
         if (settings["update"].is<bool>())            firmwareUpdates = settings["update"];
         if (settings["updateDaily"].is<bool>())       dailyUpdateCheck = settings["updateDaily"];
-        if (settings["sleepStarts"].is<int>())        sleepStarts = settings["sleepStarts"];
-        if (settings["sleepEnds"].is<int>())          sleepEnds = settings["sleepEnds"];
+        if (settings["updateSP"].is<bool>())          speechPackUpdates = settings["updateSP"];
+        if (settings["dayTime"].is<const char*>() && sscanf(settings["dayTime"], "%d:%d", &h, &m) == 2) dayTime = (h * 60) + m;
+        if (settings["nightTime"].is<const char*>() && sscanf(settings["nightTime"], "%d:%d", &h, &m) == 2) nightTime = (h * 60) + m;
+        if (settings["sleepStarts"].is<const char*>() && sscanf(settings["sleepStarts"], "%d:%d", &h, &m) == 2) sleepStarts = (h * 60) + m;
+        if (settings["sleepEnds"].is<const char*>() && sscanf(settings["sleepEnds"], "%d:%d", &h, &m) == 2) sleepEnds = (h * 60) + m;
         if (settings["brightness"].is<int>())         brightness = settings["brightness"];
-        if (settings["longPressClock"].is<bool>())    longPressClock = settings["longPressClock"];
+        if (settings["brightnessNight"].is<int>())    brightnessNight = settings["brightnessNight"];
+        if (settings["longPressAction"].is<int>())    longPressAction = settings["longPressAction"];
+        if (settings["doublePressAction"].is<int>())  doublePressAction = settings["doublePressAction"];
         if (settings["sleepUseBigClock"].is<bool>())  useNSEclockForSleep = (settings["sleepUseBigClock"]);
 
         if (settings["noScroll"].is<bool>())          noScrolling = settings["noScroll"];
         if (settings["flip"].is<bool>())              flipScreen = settings["flip"];
         if (settings["swapBG"].is<bool>())            swapBG = settings["swapBG"];
         if (settings["mx6126"].is<bool>())            mx6126 = settings["mx6126"];
-        if (settings["ftp"].is<bool>())               enableFTP = settings["ftp"];
+        if (settings["ftp"].is<bool>())               enableFTP = (settings["ftp"] && cardReaderReady);
         if (settings["touch"].is<bool>())             touchEnabled = settings["touch"];
         if (settings["forceWakeTime"].is<int>())      stayAwakeSeconds = settings["forceWakeTime"];
         if (settings["TZ"].is<const char*>())         timezone = settings["TZ"].as<String>();
@@ -1501,6 +1548,7 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["hidePlatform"].is<bool>())      hidePlatform = settings["hidePlatform"];
         if (settings["hideOrdinals"].is<bool>())      hideOrdinals = settings["hideOrdinals"];
         if (settings["showLastSeen"].is<bool>())      showLastSeen = settings["showLastSeen"];
+        if (settings["maxRailServices"].is<int>())    maxRailServices = settings["maxRailServices"];
         if (settings["showTubeLocation"].is<bool>())  showTubeCurrentLocation = settings["showTubeLocation"];
         if (settings["showServiceMsgs"].is<bool>())   showServiceMsgs = settings["showServiceMsgs"];
 
@@ -1525,10 +1573,6 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         }
 
         if (settings["theme"].is<const char*>()) loadTheme(settings["theme"]);
-        if (!cardReaderReady) {
-          enableAudioAnnouncements = false; // No SD card so no audio
-          enableFTP = false;  // No CD card so no FTP server
-        }
 
         // Work out what board mode we're in
         JsonArray scheduler = settings["scheduler"].as<JsonArray>();
@@ -1678,11 +1722,11 @@ void softResetBoard(boardModes requestedMode) {
     setenv("TZ",ukTimezone,1);
   }
   tzset();
-  if (enableAudioAnnouncements) {
+  if (audioInitialised && enableAudioAnnouncements) {
     // Clear the audio queue
     xQueueReset(audioQueue);
     // set the volume
-    es.WriteReg(0x32,audioVolume);
+    //es.WriteReg(0x32,audioVolume);
     resetTubeAudioHistory();
   }
 
@@ -1903,10 +1947,10 @@ String getContentType(String filename) {
 }
 
 // Stream a file from the file system
-bool handleStreamFile(String filename, AsyncWebServerRequest *request) {
-  if (LittleFS.exists(filename)) {
+bool handleStreamFile(String filename, AsyncWebServerRequest *request, fs::FS &fs = LittleFS) {
+  if (fs.exists(filename)) {
     String contentType = getContentType(filename);
-    request->send(LittleFS,filename,contentType);
+    request->send(fs,filename,contentType);
     return true;
   } else return false;
 }
@@ -2018,7 +2062,7 @@ void handleFormatFFS(AsyncWebServerRequest *request) {
 
 // Fallback function for browser requests
 void handleNotFound(AsyncWebServerRequest *request) {
-  if ((LittleFS.exists(request->url())) && (request->method() == HTTP_GET)) handleStreamFile(request->url(),request);
+  if ((LittleFS.exists(request->url())) && (request->method() == AsyncWebRequestMethod::HTTP_GET)) handleStreamFile(request->url(),request);
   else if (request->url() == "/keys.htm") handleStreamGzipFlashFile(request->url(), keyshtm, sizeof(keyshtm),request);
   else if (request->url() == "/index.htm") handleStreamGzipFlashFile(request->url(), indexhtm, sizeof(indexhtm),request);
   else if (request->url() == "/editrss.htm") handleStreamGzipFlashFile(request->url(), editrsshtm, sizeof(editrsshtm),request);
@@ -2036,6 +2080,7 @@ void handleNotFound(AsyncWebServerRequest *request) {
   else if (request->url() == "/ct_Default.json") handleStreamSystemTheme(defaultTheme,request);
   else if (request->url() == "/ct_Cool_Ice.json") handleStreamSystemTheme(coolIceTheme,request);
   else if (request->url() == "/ct_Just_Orange.json") handleStreamSystemTheme(justOrangeTheme,request);
+  else if (request->url().substring(0,4) == "/sd/" && SD_MMC.exists(request->url().substring(3))) handleStreamFile(request->url().substring(3),request,SD_MMC);
   else sendResponse(404,"Not Found",request);
 }
 
@@ -2193,7 +2238,7 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
   restartTimer.once(1, []() { WiFiManager wm; wm.resetSettings(); LittleFS.format(); ESP.restart();});
 }
 
-// Interactively change the brightness of the OLED panel (called from index.htm)
+// Interactively change the brightness of the panel (called from index.htm)
 void handleBrightness(AsyncWebServerRequest *request) {
   if (request->hasParam("b")) {
     int level = request->getParam("b")->value().toInt();
@@ -2216,6 +2261,11 @@ void handleBrightness(AsyncWebServerRequest *request) {
 void handleOtaUpdate(AsyncWebServerRequest *request) {
   sendResponse(200,"Update initiated - check the Departures Board display for progress.",request);
   manualUpdateCheck = true;
+}
+
+void handleUpdateSpeechPacks(AsyncWebServerRequest *request) {
+  sendResponse(200,"Speech Pack Update initiated - check the Departure Board display for progress.",request);
+  manualSpeechPackCheck = true;
 }
 
 void doManualOtaCheck() {
@@ -2287,15 +2337,21 @@ void handleVoices(AsyncWebServerRequest *request) {
 }
 
 void handleVolume(AsyncWebServerRequest *request) {
-  if (request->hasParam("v") && enableAudioAnnouncements) {
+  if (request->hasParam("v") && audioInitialised && enableAudioAnnouncements) {
     int v = request->getParam("v")->value().toInt();
     if (v>=0 && v<=191) {
       // set the DAC gain directly
       es.WriteReg(0x32,v);
+      int vol = (float)(((v * 100) / 191) + 0.5);
+      // Reset the queue
+      xQueueReset(audioQueue);
+      if (addAudioToQueue(audioVoice,"AN/VL",true)) {
+        addAudioToQueue(audioVoice,"AN/VL",false);  // "Volume level"
+        addNumberToAudioQueue(audioVoice,vol,false);
+      } else {
+        addAudioToQueue(audioVoice,"AN/$",false);  // Play the bell for feedback
+      }
     }
-    // Reset the queue
-    xQueueReset(audioQueue);
-    addAudioToQueue(audioVoice,"AN/$",false);  // Play the bell for feedback
   }
   request->send(200, contentTypeText, "OK");
 }
@@ -2405,6 +2461,506 @@ void handleStationPicker(AsyncWebServerRequest *request)
   request->send(response);
 }
 
+/*
+ * Speech-packs update routines
+*/
+bool ensureDirectoriesExist(const char *filePath) {
+  if (!filePath || filePath[0] == '\0') return true;
+
+  char path[MAX_SP_PATH_SIZE];
+  size_t len = strnlen(filePath, sizeof(path));
+  if (len >= sizeof(path)) {
+    log_e("Path exceeds max length: %s", filePath);
+    return false;
+  }
+  strncpy(path, filePath, sizeof(path));
+
+  // Find the last slash separating the directory path from the filename
+  char *lastSlash = strrchr(path, '/');
+  if (!lastSlash || lastSlash == path) {
+    // No directory path present or file is in root (e.g., "/manifest.lst")
+    return true;
+  }
+
+  // Truncate the filename out of the string
+  *lastSlash = '\0';
+
+  // Step through path, temporarily substituting '/' with null-terminator
+  for (char *p = path + 1; *p; p++) {
+    if (*p == '/') {
+      *p = '\0';
+      if (path[0] != '\0' && !SD_MMC.exists(path)) {
+        if (!SD_MMC.mkdir(path)) {
+          log_e("Failed to create parent dir: %s", path);
+          return false;
+        }
+      }
+      *p = '/'; // Restore slash
+    }
+  }
+
+  // Create the final folder level
+  if (!SD_MMC.exists(path)) {
+    if (!SD_MMC.mkdir(path)) {
+      log_e("Failed to create dir: %s", path);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool downloadToSD(const char *remoteUrl, const char *localPath, const char *hash = nullptr) {
+
+  WiFiClientSecure httpsClient;
+  httpsClient.setInsecure();
+
+  HTTPClient http;
+  if (!http.begin(httpsClient, remoteUrl)) {
+    log_e("HTTP init fail for %s",remoteUrl);
+    return false;
+  }
+
+  http.setUserAgent("ESP32-AudioSync");
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(10000);
+
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    log_e("%s HTTP Error: %d (%s)",remoteUrl, httpCode, http.errorToString(httpCode).c_str());
+    http.end();
+    return false;
+  }
+
+  int contentLength = http.getSize();
+  log_i("Download %s (%d)",remoteUrl,contentLength);
+
+  // Ensure full target directory path exists before opening the file
+  if (!ensureDirectoriesExist(localPath)) {
+    log_e("Failed to create target directories for %s", localPath);
+    http.end();
+    return false;
+  }
+
+  // Stream to a temporary file first
+  String tempPath = String(localPath) + ".tmp";
+  if (SD_MMC.exists(tempPath)) SD_MMC.remove(tempPath);
+
+  File file = SD_MMC.open(tempPath, FILE_WRITE);
+  if (!file) {
+    log_e("Create file failed: %s", tempPath.c_str());
+    http.end();
+    return false;
+  }
+
+  // Stream response body using a 4 KB PSRAM buffer
+  const size_t bufferSize = 4096;
+  uint8_t* buffer = (uint8_t*) heap_caps_calloc(bufferSize, 1, MALLOC_CAP_SPIRAM);
+  if (buffer == nullptr) {
+    log_e("PSRAM alloc failed for download buffer");
+    file.close();
+    http.end();
+    return false;
+  }
+
+  WiFiClient* stream = http.getStreamPtr();
+  int bytesDownloaded = 0;
+
+  while (http.connected() && (contentLength < 0 || bytesDownloaded < contentLength)) {
+    size_t availableBytes = stream->available();
+    if (availableBytes > 0) {
+      int readBytes = stream->readBytes(buffer, min(availableBytes, bufferSize));
+      file.write(buffer, readBytes);
+      bytesDownloaded += readBytes;
+    } else {
+      delay(1);
+    }
+  }
+
+  file.close();
+  http.end();
+  heap_caps_free(buffer);
+
+  // Verify file size if Content-Length header was supplied
+  if (contentLength > 0 && bytesDownloaded != contentLength) {
+    log_e("Download incomplete for %s: received %d / %d bytes", localPath, bytesDownloaded, contentLength);
+    SD_MMC.remove(tempPath);
+    return false;
+  }
+
+  // Verify the file size written to the SD card
+  file = SD_MMC.open(tempPath, FILE_READ);
+  if (file) {
+    if (file.size() != contentLength) {
+      log_e("Download incomplete for %s: %d bytes of %d written to SD card", localPath, file.size(), contentLength);
+      file.close();
+      SD_MMC.remove(tempPath);
+      return false;
+    }
+  } else {
+    log_e("Error checking file size: %s",localPath);
+    SD_MMC.remove(tempPath);
+    return false;
+  }
+
+  // Verify the file hash
+  if (hash != nullptr) {
+    md5Utils md5;
+    String fileHash = md5.calculateFileMD5(tempPath.c_str(), SD_MMC);
+    if (strcmp(hash,fileHash.c_str())) {
+      log_e("Error MD5 hash mismatch %s : %s",hash,fileHash.c_str());
+      SD_MMC.remove(tempPath);
+      return false;
+    } else log_i("MD5 hash confirmed for %s",tempPath.c_str());
+  } else log_i("No hash provided for this file");
+
+  // Atomic replace: Delete old target file and rename .tmp
+  if (SD_MMC.exists(localPath)) {
+    SD_MMC.remove(localPath);
+  }
+
+  if (!SD_MMC.rename(tempPath, localPath)) {
+    log_e("Rename failed for %s", localPath);
+    SD_MMC.remove(tempPath);
+    return false;
+  }
+
+  log_i("%s downloaded successfully", localPath);
+  return true;
+}
+
+bool spDownload(ManifestEntry& entry, const char *installedPacks) {
+  int packId = entry.path[2] - '0';
+  char msg[60];
+  if (installedPacks[packId-1] == 'Y') {
+    // Pack is installed, so update the file
+    snprintf(msg,sizeof(msg),"Downloading: %s",entry.path);
+    centreText(msg,LINE3,RGB565_LIGHTBLUE,RAIL9,u8g2_main);
+    sendBuffer();
+    String downloadUrl = String(GITHUB_SPEECHPACKS_REPO) + String(entry.path);
+    bool result = downloadToSD(downloadUrl.c_str(), entry.path, entry.hash);
+    if (!result) {
+      snprintf(msg,sizeof(msg),"Retrying: %s",entry.path);
+      blankArea(0,LINE3,SCREEN_WIDTH,9);
+      centreText(msg,LINE3,RGB565_ORANGE,RAIL9,u8g2_main);
+      sendBuffer();
+      delay(3000);
+      result = downloadToSD(downloadUrl.c_str(), entry.path, entry.hash);
+    }
+    blankArea(0,LINE3,SCREEN_WIDTH,9);
+    sendBuffer();
+    return result;
+  } else {
+    log_i("Speech pack %d not installed, skipping download %s",packId,entry.path);
+    return true; // Pack is not installed so just return success
+  }
+}
+
+void deleteLocalSpeechPackFile(const char *path) {
+  log_i("%s is no longer needed and could be deleted");
+}
+
+bool parseManifestEntry(const String& line, ManifestEntry& entry) {
+  if (line.length()>35 && line.indexOf(",")==32) {
+    line.substring(0,32).toCharArray(entry.hash,sizeof(entry.hash));
+    line.substring(33).toCharArray(entry.path,sizeof(entry.path));
+    return true;
+  } else return false;
+}
+
+int syncManifests(File& localFile, HTTPClient& httpRemote, const char *installedPacks) {
+
+  WiFiClient* remoteStream = httpRemote.getStreamPtr();
+  ManifestEntry localEntry, remoteEntry;
+  bool hasLocal = false, hasRemote = false;
+  int numFilesChanged = 0;
+  int remoteManifestLength = httpRemote.getSize();
+  int remoteBytesRead = 0;
+  int progressPct = 0;
+  int prevProgressPct = 0;
+
+  if (remoteManifestLength <= 0) remoteManifestLength = 340000; // Approx size if not returned by server
+
+  progressBar("Checking Speech Pack files...",0);
+  // Outer condition: keep processing as long as local file has data,
+  // OR remote stream is connected/has data, OR we have stashed entries waiting to be processed
+  while ((localFile.available() || hasLocal) || (remoteStream->connected() || remoteStream->available() || hasRemote)) {
+
+      // Get the next local entry if needed
+      if (!hasLocal && localFile.available()) {
+        String line = localFile.readStringUntil('\n');
+        line.trim();
+        if (line.length() > 0) hasLocal = parseManifestEntry(line, localEntry);
+      }
+
+      // Get the next remote entry if needed
+      if (!hasRemote && (remoteStream->available() || remoteStream->connected())) {
+        unsigned long waitStart = millis();
+        // Allow up to 3 seconds for incoming TCP packets if buffer is temporarily empty
+        while (!remoteStream->available() && remoteStream->connected() && (millis() - waitStart < 3000)) delay(10);
+
+        if (remoteStream->available()) {
+          String line = remoteStream->readStringUntil('\n');
+          remoteBytesRead+=(line.length()+1);
+          line.trim();
+          if (line.length() > 0) hasRemote = parseManifestEntry(line, remoteEntry);
+        }
+      }
+
+      // If neither stream has a valid entry and no buffered items remain, break out
+      if (!hasLocal && !hasRemote) break;
+
+      // How far through the sync are we
+      progressPct = (remoteBytesRead * 100) / remoteManifestLength;
+      if (progressPct > prevProgressPct) {
+        drawProgressBar(progressPct);
+        prevProgressPct = progressPct;
+      }
+
+      // Compare local vs remote entries
+      if (hasLocal && hasRemote) {
+        int cmp = strcmp(remoteEntry.path, localEntry.path);
+        if (cmp == 0) {
+          // Same file: Check if hash changed
+          if (strcmp(remoteEntry.hash,localEntry.hash)) {
+              if (spDownload(remoteEntry, installedPacks)) numFilesChanged++; else return -1; // Abort on download failure
+          }
+          // Advance both pointers
+          hasLocal = false;
+          hasRemote = false;
+        }
+        else if (cmp < 0) {
+            // Remote file path comes before local alphabetically -> NEW FILE
+            if (spDownload(remoteEntry, installedPacks)) numFilesChanged++; else return -1; // Abort on download failure
+            hasRemote = false; // Advance remote stream only
+        }
+        else {
+            // Local file path comes before remote -> DELETED on remote
+            deleteLocalSpeechPackFile(localEntry.path);   // Just log, we don't delete anything just yet!
+            hasLocal = false;  // Advance local stream only
+        }
+      }
+      else if (hasRemote) {
+          // Local file reached EOF, remaining remote entries are all NEW
+          if (spDownload(remoteEntry, installedPacks)) numFilesChanged++; else return -1; // Abort on download failure
+          hasRemote = false;
+      }
+      else if (hasLocal) {
+          // Remote stream reached EOF, remaining local entries were DELETED
+          deleteLocalSpeechPackFile(localEntry.path);   // Just log, we don't delete anything just yet!
+          hasLocal = false;
+      }
+  }
+  return numFilesChanged;
+}
+
+bool executeManifestSync() {
+
+  char installedPacks[9], packPath[15];
+  clearCanvas();
+  if (audioInitialised && enableAudioAnnouncements) xQueueReset(audioQueue); // Stop playing audio
+
+  prevProgressBarPosition = 0;
+  progressBar("Examining installed Speech Packs",0);
+  for (int i=1;i<10;i++) {
+    sprintf(packPath,"/V%d/voice.json",i);
+    if (SD_MMC.exists(packPath)) installedPacks[i-1] = 'Y'; else installedPacks[i-1] = 'N';
+  }
+  if (strcmp(installedPacks,"NNNNNNNNN")==0) {
+    log_w("No speech packs found on sd card.");
+    return false;
+  }
+
+  progressBar("Fetching manifest from GitHub",0);
+
+  if (!SD_MMC.exists("/manifest.lst")) {
+  // No manifest file on the sd card, so download the default base layout
+    if (!downloadToSD(GITHUB_SPEECHPACKS_DEFAULT_MANIFEST,"/manifest.lst")) {
+      // Wait 3 seconds and retry
+      delay(3000);
+      if (!downloadToSD(GITHUB_SPEECHPACKS_DEFAULT_MANIFEST,"/manifest.lst")) {
+        // Failed to get the file successfully, abort the sync
+        return false;
+      }
+    }
+    delay(100);
+  }
+
+  File localFile = SD_MMC.open("/manifest.lst", FILE_READ);
+  if (!localFile) {
+    log_e("No local manifest found. Aborting sync...");
+    return false;
+  }
+
+  int syncResult = 0;
+  WiFiClientSecure httpsClient;
+  httpsClient.setInsecure();
+  httpsClient.setTimeout(5000);
+  httpsClient.setConnectionTimeout(5000);
+
+  HTTPClient http;
+  String manifestUrl = String(GITHUB_SPEECHPACKS_REPO) + "/manifest.lst";
+
+  if (http.begin(httpsClient, manifestUrl)) {
+    // GitHub raw content requires a User-Agent header
+    http.setUserAgent("ESP32-AudioSync");
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setTimeout(10000);
+
+    int httpCode = http.GET();
+    if (httpCode == HTTP_CODE_OK) {
+        // Wait for incoming socket data buffer to populate before reading
+        WiFiClient* stream = http.getStreamPtr();
+        unsigned long startWait = millis();
+
+        while (stream->connected() && !stream->available() && (millis() - startWait < 5000)) delay(10); // Wait up to 5 seconds for first bytes to arrive in socket buffer
+
+        if (stream->available() > 0) {
+          unsigned long perfTimer = millis();
+          syncResult = syncManifests(localFile, http, installedPacks);
+          log_i("Manifest sync (%d) took %d ms", syncResult, millis()-perfTimer);
+          localFile.close();
+          http.end();
+          if (syncResult < 0) return false;
+        } else {
+          log_e("Remote manifest.lst HTTP 200 returned but stream timed out with 0 available bytes.");
+          localFile.close();
+          http.end();
+          return false;
+        }
+    } else {
+      log_e("Remote manifest.lst HTTP GET failed, error code: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
+      localFile.close();
+      http.end();
+      return false;
+    }
+    // Sync manifests successful.
+    if (syncResult) {
+      // Need to update local manifest file
+      progressBar("Updating local manifest file",100);
+      bool result = downloadToSD(manifestUrl.c_str(), "/manifest.lst");
+      if (!result) {
+        progressBar("Retry update local manifest",100);
+        delay(3000);
+        result = downloadToSD(manifestUrl.c_str(), "/manifest.lst");
+      }
+      if (result) {
+        progressBar("Installed Speech Packs are up to date.",100);
+        log_i("Local manifest updated successfully");
+        return true;
+      } else {
+        log_e("Failed to update local manifest");
+        return false;
+      }
+    }
+    progressBar("Installed Speech Packs are up to date.",100);
+    log_i("No speech-pack changes found");
+    return true;
+  } else {
+    log_e("Remote manifest: failed to initialize HTTP client");
+    localFile.close();
+    return false;
+  }
+}
+
+int getRemoteSpeechPackVersion() {
+
+  // Get the latest version from GitHub
+  WiFiClientSecure httpsClient;
+  httpsClient.setInsecure();
+  httpsClient.setTimeout(5000);
+  httpsClient.setConnectionTimeout(5000);
+
+  HTTPClient http;
+  char versionUrl[sizeof(GITHUB_SPEECHPACKS_REPO) + 14];
+  sprintf(versionUrl,"%s%s",GITHUB_SPEECHPACKS_REPO,"/version.json");
+  if (!http.begin(httpsClient,versionUrl)) {
+    log_e("HTTP init failed retrieving version.json");
+    return -1;
+  }
+
+  http.setUserAgent("ESP32-AudioSync");
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.setTimeout(8000);
+
+  int httpCode = http.GET();
+  int versionNumber = -1;
+
+  if (httpCode == HTTP_CODE_OK) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, http.getStream());
+
+    if (!error) {
+      if (doc["version"].is<int>()) {
+        versionNumber = doc["version"].as<int>();
+      }
+    } else {
+      log_e("version.json deserialization failed: %s",error);
+    }
+  } else {
+    log_e("HTTP GET version.json failed with code: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
+  }
+
+  http.end();
+  return versionNumber;
+}
+
+bool checkSpeechPackUpdate() {
+
+  if (!cardReaderReady) return false;
+
+  // Get the installed version number
+  int localVersionNumber = 0;
+  JsonDocument doc;
+  if (SD_MMC.exists("/version.json")) {
+    File file = SD_MMC.open("/version.json", "r");
+    if (file) {
+      DeserializationError error = deserializeJson(doc, file);
+      if (!error) {
+        JsonObject info = doc.as<JsonObject>();
+        if (info["version"].is<int>()) localVersionNumber = info["version"].as<int>();
+      }
+      file.close();
+    }
+  }
+
+  int remoteVersionNumber = getRemoteSpeechPackVersion();
+  if (localVersionNumber < remoteVersionNumber) {
+    // Attempt to load the updates
+    if (executeManifestSync()) {
+      // Update the local version number
+      String ver = "{\"version\": " + String(remoteVersionNumber) + "}";
+      File file = SD_MMC.open("/version.json", "w");
+      if (file) {
+        file.println(ver);
+        file.close();
+      } else {
+        progressBar("Failed to update version.json!",100);
+        log_e("Failed to update local version.json");
+      }
+      delay(5000);
+    } else {
+      clearCanvas();
+      centreText("Update check DID NOT complete successfully.",LINE1,RGB565_RED,RAIL9,u8g2_main);
+      centreText("* PLEASE TRY THE UPDATE AGAIN LATER *",LINE2,RGB565_WHITE,RAIL9,u8g2_main);
+      sendBuffer();
+      delay(8000);
+    }
+    clearCanvas();
+    drawStartupHeading();
+    sendBuffer();
+    return true;
+  } else {
+    log_i("Speech Pack up to date %d/%d",localVersionNumber,remoteVersionNumber);
+    return false;
+  }
+}
+
+void doManualSpeechPackUpdate() {
+  manualSpeechPackCheck = false;
+  softResetNeeded = true;
+  checkSpeechPackUpdate();
+}
 
 /*
  * Station Board functions - pulling updates and animating the Departures Board main display
@@ -2576,8 +3132,9 @@ void drawStationBoard() {
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    dma_display->setBrightness(brightness);
-    restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    //dma_display->setBrightness(brightness);
+    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    configDayNight();
     firstLoad=false;
     line3Service = noScrolling ? 1 : 0;
   } else {
@@ -2716,6 +3273,7 @@ void updateRailDepartures() {
   lastDataLoadTime = millis();
   noDataLoaded = false;
   dataLoadSuccess++;
+  if (station->numServices > maxRailServices) station->numServices = maxRailServices;
 }
 
 void waitForFirstLoad() {
@@ -2794,8 +3352,9 @@ void drawUndergroundBoard() {
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    dma_display->setBrightness(brightness);
-    restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    //dma_display->setBrightness(brightness);
+    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    configDayNight();
     firstLoad=false;
   } else {
       if (lastUpdateResult == UPD_SEC_CHANGE) {
@@ -2917,8 +3476,9 @@ void drawBusDeparturesBoard() {
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    dma_display->setBrightness(brightness);
-    restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    //dma_display->setBrightness(brightness);
+    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
+    configDayNight();
     firstLoad=false;
   } else {
       // Clear the top two lines
@@ -2984,7 +3544,7 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
   char speechFile[24];
   int hour, minute;
 
-  if (!enableAudioAnnouncements || station->numServices==0) return false;
+  if (!audioInitialised || !enableAudioAnnouncements || audioMuted || station->numServices==0) return false;
 
   bool result = addAudioToQueue(announcer, "AN/$", checkPath); // ding dong
   if (station->service[0].isCancelled) {
@@ -3166,7 +3726,7 @@ bool playTubeService(const char *announcer, int svcIndex, int announcementNumber
   char speechFile[20];
   char lineFilename[9];
 
-  if (!enableAudioAnnouncements || station->numServices==0) return false;
+  if (!audioInitialised || !enableAudioAnnouncements || audioMuted || station->numServices==0) return false;
 
   // Common start of speech
   bool result = true;
@@ -3252,7 +3812,7 @@ void departureBoardLoop() {
         // Retrieve the updated data
         updateRailDepartures();
         drawStationBoard();
-        if (enableAudioAnnouncements && station->numServices && strcmp(station->service[0].serviceId,currentServiceId)) {
+        if (audioInitialised && enableAudioAnnouncements && station->numServices && strcmp(station->service[0].serviceId,currentServiceId)) {
           strlcpy(currentServiceId,station->service[0].serviceId,sizeof(currentServiceId));
           if (playPrimaryService(audioVoice,true)) playPrimaryService(audioVoice,false);
         }
@@ -3398,7 +3958,7 @@ int findServiceInAudioHistory(const char* svcId) {
 
 void checkTubeAudioAnnouncement() {
 
-  if (!enableAudioAnnouncements || !station->numServices) return;
+  if (!audioInitialised || !enableAudioAnnouncements || !station->numServices) return;
 
   // Check all the services, stop after three announcements on this pass
   int announcements = 0;
@@ -3800,6 +4360,18 @@ void busDeparturesLoop() {
   }
 }
 
+void actionTap(byte action) {
+  if (action == 1) {
+    NSEclockIsActive = !NSEclockIsActive;
+  } else if (action == 2) {
+    if (audioInitialised && enableAudioAnnouncements) {
+      audioMuted = !audioMuted;
+      xQueueReset(audioQueue);
+      if (!audioMuted) addAudioToQueue(audioVoice,"AN/AO",false); else addAudioToQueue(audioVoice,"AN/AF",false);
+    }
+  }
+}
+
 // The Core 0 Background Data Fetch Task
 void fetchDeparturesTask(void *pvParameters) {
   while(true) {
@@ -3861,10 +4433,9 @@ void AudioTask(void *pvParameters) {
         // Start new track if idle
         if (!wavFile) {
             if (xQueueReceive(audioQueue, &cmd, 0) == pdTRUE) {
-                if (cmd.delay) vTaskDelay(cmd.delay);   // pause before playback
+                if (cmd.delay) i2s.writeSilence(cmd.delay * 44); // pause before playback
                 wavFile = SD_MMC.open(cmd.filename, "r");
                 if (wavFile) {
-                    i2s.writeSilence(1024);
                     decoderStream.begin();
                     copier.begin(decoderStream, wavFile);
                 }
@@ -3879,8 +4450,6 @@ void AudioTask(void *pvParameters) {
 
           // EOF detection
           if (!wavFile.available() && !bytesCopied) {
-              i2s.flush();
-              i2s.writeSilence(256);
               wavFile.close();
               decoderStream.end();
           }
@@ -3903,6 +4472,7 @@ void setup() {
   sprintf(notice,"\xA9 %s Gadec Software", buildDate.substring(buildDate.length()-4).c_str());
 
   bool isFSMounted = LittleFS.begin(true);    // Start the File System, format if necessary
+  cardReaderReady = setupCardReader();        // Check if the card ready is ready with a card installed
   strcpy(station->location,"");               // No default location
   strcpy(weatherMsg,"");                      // No weather message
   strcpy(nrToken,"");                         // No default National Rail token
@@ -3928,8 +4498,6 @@ void setup() {
   // Initialise default font for clip canvas
   setBoardFont(RAIL9,u8g2_clip);
 
-  if (!(cardReaderReady = setupCardReader())) enableAudioAnnouncements = false;
-
   if (enableAudioAnnouncements) {
     if (setupAudioSystem()) {
       // set the volume to the saved value
@@ -3948,9 +4516,8 @@ void setup() {
           NULL,            // Task handle
           0                // Core ID: 0
       );
-    } else {
-      // setup failed, disable audio
-      enableAudioAnnouncements = false;
+
+      audioInitialised = true;
     }
   }
 
@@ -4014,6 +4581,7 @@ void setup() {
   server.on("/voices", HTTP_GET, [](AsyncWebServerRequest *request){handleVoices(request);});
   server.on("/success", HTTP_GET, [](AsyncWebServerRequest *request){handleStreamGzipFlashFile(request->url(), successhtm, sizeof(successhtm),request);});
   server.on("/vol", HTTP_GET, [](AsyncWebServerRequest *request){handleVolume(request);});
+  server.on("/updsp", HTTP_GET, [](AsyncWebServerRequest *request){handleUpdateSpeechPacks(request);});
   server.on("/getthemes", HTTP_GET, [](AsyncWebServerRequest *request){handleGetThemes(request);});
   server.on("/loadtheme", HTTP_GET, [](AsyncWebServerRequest *request){handleLoadTheme(request);});
 
@@ -4210,6 +4778,12 @@ void setup() {
       sendBuffer();
     }
   }
+
+  if (speechPackUpdates) {
+    progressBar("Checking for Speech Pack updates",45);
+    checkSpeechPackUpdate();
+  }
+
   checkPostWebUpgrade();
   // First time configuration?
   if ((!railIsSet && !tubeIsSet && !busIsSet) || (!nrToken[0] && rdmDeparturesApiKey=="" && boardMode==MODE_RAIL)) {
@@ -4253,12 +4827,11 @@ void setup() {
   resetTubeAudioHistory();
 
   // Start FTP Server?
-  if (enableFTP && cardReaderReady) {
+  if (enableFTP) {
     ftpSvr = new FtpServer();
     if (ftpSvr) {
       ftpSvr->begin("admin","depboard","Matrix Departure Board SD Card");
-    } else {
-      enableFTP = false;
+      ftpRunning = true;
     }
   }
 
@@ -4323,8 +4896,10 @@ void loop() {
     } else {
       switchToNextMode();
     }
-  } else if (button.wasLongTapped() && longPressClock) {
-    NSEclockIsActive = !NSEclockIsActive;
+  } else if (button.wasLongTapped()) {
+    actionTap(longPressAction);
+  } else if (button.wasDoubleTapped()) {
+    actionTap(doublePressAction);
   }
 
   if (millis()-lastTimeUpdate >= 100) {
@@ -4360,6 +4935,10 @@ void loop() {
     softResetBoard(MODE_LOADCONFIG);
   }
 
+  bool wasNightTime = isNightTime;
+  isNightTime = isItNightTime();
+  if (isNightTime != wasNightTime && !isSleeping) configDayNight();
+
   // WiFi Status check
   if (WiFi.status() != WL_CONNECTED && wifiConnected) {
     wifiConnected=false;
@@ -4391,6 +4970,8 @@ void loop() {
   }
 
   if (manualUpdateCheck && !fetchInProgress) doManualOtaCheck();
+
+  if (manualSpeechPackCheck && !fetchInProgress) doManualSpeechPackUpdate();
 
   if (rssEnabled && boardMode != MODE_BUS && millis() > nextRssUpdate && !fetchInProgress && !isSleeping && wifiConnected) {
     // Start an RSS Update on Core 0
@@ -4435,6 +5016,6 @@ void loop() {
     nextSchedulerCheck = millis() + 10000;  // ten seconds
   }
 
-  if (enableFTP) ftpSvr->handleFTP();
+  if (ftpRunning) ftpSvr->handleFTP();
 
 }

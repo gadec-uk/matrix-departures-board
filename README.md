@@ -8,9 +8,9 @@ A table-top version using a 3.12" OLED panel is also available [here](https://gi
 
 ## Features
 * All processing is done onboard by the ESP32-S3 processor, no middleware servers.
-* Two speech-packs are included to provide station audio announcements for all 2600+ National Rail stations and 300+ London Underground stations, plus common delay and cancellation reasons.
+* Two (speech-packs)[https://github.com/gadec-uk/speech-packs] are included to provide station audio announcements for all 2600+ National Rail stations and 300+ London Underground stations, plus common delay and cancellation reasons.
 * Optional station audio reverb effect (for that authentic atmosphere!).
-* Support for touch sensor to switch modes / stations / wake from screensaver.
+* Support for user configurable touch sensor to switch modes / stations / wake from screensaver / mute audio etc.
 * Smooth animation matching the real departures and arrivals boards.
 * Displays up to the next 9 departures with scheduled time, platform number, destination, calling stations and expected departure time.
 * Optionally display the last reported location of a service.
@@ -27,6 +27,7 @@ A table-top version using a 3.12" OLED panel is also available [here](https://gi
 * RSS Feed Editor to add custom headline feeds.
 * Fully-featured browser based configuration screens - choose any station on the UK network / London Tube & DLR network / UK Bus Stops.
 * Automatic firmware updates (optional).
+* Automatic speech-pack updates (optional).
 * Displays the weather at the selected location (optional).
 * Full-screen, Network SouthEast style station clock (optional).
 
@@ -44,7 +45,7 @@ You can see the board in action in the demonstration video below:
 2. Three 64x32 HUB75 LED Matrix panels. These come in various dot pitches (the spacing between each individual LED pixel). With the most compact pitch (P2.5), the finished board will measure 480x80mm. With P5 panels, the board will measure 960x160mm. For example, from [AliExpress](https://www.aliexpress.com/item/1005008394801350.html).
 3. Optionally, a TTP223 touch sensor (for easily switching modes / stations). For example, from [AliExpress](https://www.aliexpress.com/item/1005007850732859.html).
 4. A Micro SD card for storing the audio speech-packs.
-5. A good quality USB-C power supply (5A recommended for running at high brightness levels). For example, from [Amazon](https://www.amazon.co.uk/dp/B0D12H1N4L)
+5. A good quality USB-C power supply (5A recommended for running the largest panels at high brightness levels). For example, from [Amazon](https://www.amazon.co.uk/dp/B0D12H1N4L). Smaller panels will only require a 2.4A supply for this project.
 6. For National Rail, the board supports using either the Rail Delivery Group feeds (recommended) or the legacy OpenLDBWS feed. Both feeds are free of charge and provide identical information but the legacy OpenLDBWS feed may be discontinued in the future. To use the Rail Delivery Group feeds, you will need a [Live Departure Board 1.1](https://raildata.org.uk/dataProduct/P-d81d6eaf-8060-4467-a339-1c833e50cbbe/overview) consumer key and (optionally) a [Service Details 1.1](https://raildata.org.uk/dataProduct/P-4dec1247-d040-4290-80a4-639dfac54a92/overview) consumer key.
 7. By default, weather data is sourced from Open-Meteo. If you prefer to use OpenWeather (which usually provides slightly more localised weather conditions) you will need an OpenWeather Map API token (these are also free, sign-up for a free developer account [here](https://home.openweathermap.org/users/sign_up)).
 
@@ -54,7 +55,7 @@ A step-by-step guide to obtaining the API keys is available [here](https://matri
 
 ### Assembly
 
-Format the micro-SD card as FAT32 and copy all of the [speech-pack](https://github.com/gadec-uk/matrix-departures-board/tree/main/speech-packs) files to the root of the card, retaining the folder structure (the root folder should contain only the V1 and V2 folders). Insert the card into the slot on the processor board and attach the supplied speaker.
+Format the micro-SD card as FAT32 and copy all of the [speech-pack](https://github.com/gadec-uk/speech-packs/tree/main/sdcard) files to the root of the card, retaining the folder structure (the root folder should contain only the V1 and V2 folders, plus manifest.lst and version.json files). Insert the card into the slot on the processor board and attach the supplied speaker.
 
 The processor board is plugged into the first panel's HUB75 "in" socket, the "out" socket is connected to the next panel's "in" socket and the "out" socket of that panel is connected to the "in" socket of the third panel (using the ribbon cables provided with the panels). Separate power cables must be connected for each panel, all three fed from the power output (screw terminals) on the processor board. If the processor board does not fit snugly to the first panel, or if it overhangs the edge of panel causing an issue with your case design, you can add an extension cable between the board and the panel - for example, from [AliExpress](https://www.aliexpress.com/item/1005006111139993.html).
 
@@ -70,9 +71,9 @@ Plug the USB-C power supply into the USB-C socket labelled "POWER" and connect t
 
 ### Installing the firmware
 
-The project uses the Arduino framework and the ESP32 v3.3.9 core. If you want to build from source, you'll need [PlatformIO](https://platformio.org).
+The project uses the Arduino framework and the ESP32 v3.3.12 core. If you want to build from source, you'll need [PlatformIO](https://platformio.org).
 
-The easiest way to install the firmware for the first time is to use the online web based installer [here](https://matrix-departures-board.github.io). You will need to use Chrome, Edge or Firefox as your browser as Safari does not support Web Serial.
+The easiest and recommended way to install the firmware for the first time is to use the online web based installer [here](https://matrix-departures-board.github.io). You will need to use Chrome, Edge or Firefox as your browser as Safari does not support Web Serial.
 
 Alternatively, you can download pre-compiled firmware images from the [releases](https://github.com/gadec-uk/matrix-departures-board/releases). These can be installed over the USB serial connection using [esptool](https://github.com/espressif/esptool). If you have python installed, install with *pip install esptool*. For convenience, a pre-compiled executable version for Windows is included [here](https://github.com/gadec-uk/matrix-departures-board/tree/main/esptool).
 
@@ -98,6 +99,8 @@ If using the pre-compiled esptool.exe version on Windows, save the esptool.exe a
 
 Subsequent updates can be carried out automatically over-the-air or you can manually update from the Web GUI.
 
+If you have difficulties using the esptool command line, please use the online web based installer [here](https://matrix-departures-board.github.io) which is completely automated.
+
 ### First time configuration
 
 WiFiManager is used to setup the initial WiFi connection on first boot. The ESP32 will broadcast a temporary WiFi network named "Departures Board", connect to the network and follow the on-screen instructions.
@@ -120,7 +123,9 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 - **Only show these Bus services** - filter buses by service numbers (enter a list of the service numbers, comma separated).
 - **Recently verified ATCO codes** - quickly select from recently used bus stop ATCO codes.
 #### Options tab ####
-- **Brightness** - adjusts the brightness of the LED matrix panels.
+- **Day time brightness** - adjusts the brightness of the LED matrix panels during day time hours.
+- **Night time brightness** - adjusts the brightness of the LED matrix panels during night time hours.
+- **Day time / Night time** - Set the times for day time and night time settings (brightness/volume).
 - **Show current location name** - displays the currently selected station or bus stop name in the cycle of services, following the clock.
 - **Show current weather at station/bus stop** - optionally display weather conditions at the selected station or bus stop.
 - **Include bus replacement services** - optionally include bus replacement services (National Rail mode).
@@ -131,15 +136,18 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 - **Show service last seen location** - adds the last reported location and time of a service to the Calling at list (National Rail).
 - **Wait for Calling at list to complete** - waits for the Calling at list to finish scrolling before changing the primary service.
 - **Wait for Messages or RSS to complete** - waits for the current service message or RSS headline feed to finish scrolling before changing the primary service.
+- **Maximum rail services to show** - select the maximum number of rail services that the board will cycle through.
 - **Full screen clock if no train services** - displays the full screen, Network SouthEast style station clock if there are no scheduled services at the selected railway station.
 - **Enable audio announcements** - Enables station audio announcements in Rail / Tube mode. A micro SD card with speech-pack files must be present.
 - **Announcer voice** - Select which station announcer you want to hear. Two speech-packs are provided as standard: "Andy" and "Ruth".
-- **Audio volume** - Set the volume level for audio announcements.
+- **Day time audio volume** - Set the volume level for audio announcements during day time hours.
+- **Night time audio volume** - Set the volume level for audio announcements during night time hours.
 - **Enable station reverb effect** - Enables a reverb (echo) effect for more atmospheric sounding announcements.
 - **Enable "calling at" announcements** - The station announcements will read out the full listing of calling stations for a service.
-- **Enable automatic firmware updates at startup** - automatically checks for AND installs the latest firmware from this repository when the system starts up.
-- **Enable daily check for firmware updates** - when enabled, the system will check for and install any updates just after midnight if the board is powered on.
-- **Enable overnight sleep mode (screensaver)** - if you're running the board 24/7, you select a time period for the screen to be off (or a full screen clock to be shown).
+- **Automatic firmware updates at startup** - automatically checks for AND installs the latest firmware from this repository when the system starts up.
+- **Daily check for firmware updates** - when enabled, the system will check for and install any updates just after midnight if the board is powered on.
+- **Automatic speech pack updates at startup** - automatically checks for AND downloads available updates for installed speech packs when the system starts up.
+- **Overnight sleep mode (screensaver)** - if you're running the board 24/7, you select a time period for the screen to be off (or a full screen clock to be shown).
 - **Full screen clock during sleep mode** - displays the full screen station clock during sleep mode.
 #### Schedule tab ####
 - **Enable scheduler** - automatically switches between views based on the configured time of each entry in the scheduler list below.
@@ -149,7 +157,8 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 #### Advanced Tab ####
 - **Enable touch sensor** - a tap switches between configured modes (rail/tube/bus) or wakes from sleep. If the Scheduler or Carousel mode is active, a tap switch to the next location in the list. Obviously, do not enable this option if you have not installed a TTP223 touch sensor.
 - **Wake from sleep by touch for** - if the board is in screensaver mode and the touch sensor is enabled, a tap will wake the board and it will remain awake for the selected number of minutes (the countdown timer resets on each tap).
-- **Long press displays full screen clock** - a long tap switches to the full screen station clock. A short tap will revert to normal operation.
+- **Long tap action** - select what action to take for a long tap on the touch sensor.
+- **Double tap action** - select what action to take for a double-tap on the touch sensor.
 - **Flip the display 180°** - Rotates the display.
 - **Swap blue/green pixel order** - different panel manufacturers use different pixel colour orders. If you board is displaying colours incorrectly, select this option to reverse the blue/green order.
 - **Enable support for FM6126A driver** - if your matrix panels use FM6126A chips they will require a special initialisation sequence.
@@ -165,6 +174,7 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 
 A drop-down menu (top-right) adds the following options:
 - **Check for Updates** - manually checks for and optionally installs any updates to the firmware. Also displays the release notes of the latest firmware.
+- **Check for Speech Pack Updates** - manually checks for and optionally downloads any updates for installed speech packs.
 - **Edit API Keys** - view/edit your National Rail, OpenWeather Map and Transport for London API keys.
 - **Edit RSS Feeds** - loads the RSS Feeds Editor where you can add/edit/delete custom headline feeds.
 - **Clear WiFi Settings** - deletes the stored WiFi credentials and restarts in WiFiManager mode (useful to change WiFi network).
@@ -190,9 +200,9 @@ Every UK bus stop has a unique ATCO code number. To find the ATCO code of the st
 To set a custom time zone for the departure board clock, you will need to enter the POSIX time zone string for your location. Some examples are `CST6CDT,M3.2.0/2,M11.1.0/2` for Canada (Central Time) and `AEST-10AEDT,M10.1.0,M4.1.0/3` for Australia (Eastern Time). The easiest way to find the correct syntax is to ask your favourite AI chat engine *"What is the POSIX time zone string for ..."*. Note that changing the time zone only affects the clock (and date) display. Service times are *always* shown in UK time.
 
 ### Speech-Packs ###
-Two [speech-packs](https://github.com/gadec-uk/matrix-departures-board/tree/main/speech-packs) are included. Both were generated using [Chatterbox AI](https://chatterboxai.net/) with public domain voice samples from [LibriVox](https://librivox.org/). "Andy" was created from a voice sample of [Andy Minter](https://librivox.org/reader/152) and "Ruth" was created from a voice sample of [Ruth Golding](https://librivox.org/reader/2607). All of the generated audio files were level matched to ITU-R BS.1770-3 Loudness at -17 LUFS and then MP3 mono encoded at 48kbps with a sample rate of 22050Hz.
+Two [speech-packs](https://github.com/gadec-uk/speech-packs) are included. Both were generated using [Chatterbox AI](https://chatterboxai.net/) with public domain voice samples from [LibriVox](https://librivox.org/). "Andy" was created from a voice sample of [Andy Minter](https://librivox.org/reader/152) and "Ruth" was created from a voice sample of [Ruth Golding](https://librivox.org/reader/2607). All of the generated audio files were level matched to ITU-R BS.1770-3 Loudness at -17 LUFS and then MP3 mono encoded at 48kbps with a sample rate of 22050Hz.
 
-Additional speech-packs can be added to the card. You must follow the same file and folder naming conventions and all files must be encoded as MP3 mono 22050Hz at 48kbps.
+Additional speech-packs can be added to the card. You must follow the same file and folder naming conventions and all files must be encoded as MP3 mono 22050Hz at 48kbps. User created Speech Packs should be stored in folders VA, VB, VC etc. Folders V3 to V9 are reserved for future system Speech Packs.
 
 ### Donating
 
