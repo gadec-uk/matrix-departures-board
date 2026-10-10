@@ -8,7 +8,7 @@ A table-top version using a 3.12" OLED panel is also available [here](https://gi
 
 ## Features
 * All processing is done onboard by the ESP32-S3 processor, no middleware servers.
-* Two (speech-packs)[https://github.com/gadec-uk/speech-packs] are included to provide station audio announcements for all 2600+ National Rail stations and 300+ London Underground stations, plus common delay and cancellation reasons.
+* Two [speech-packs](https://github.com/gadec-uk/speech-packs) are included to provide station audio announcements for all 2600+ National Rail stations and 300+ London Underground stations, plus common delay and cancellation reasons.
 * Optional station audio reverb effect (for that authentic atmosphere!).
 * Support for user configurable touch sensor to switch modes / stations / wake from screensaver / mute audio etc.
 * Smooth animation matching the real departures and arrivals boards.
