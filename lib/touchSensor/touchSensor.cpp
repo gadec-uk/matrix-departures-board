@@ -33,19 +33,21 @@ void touchSensor::updateTouchState() {
         doubleTapDetected = false;
       } else {
         unsigned long touchLengthMs = millis()-touchStartedMs;
-        if (touchLengthMs < longTapMs) {
-          if (waitingForDoubleTap && ((millis() - firstTapEndTimeMs) < doubleTapWindowMs)) {
-            doubleTapDetected = true;
+        if (touchLengthMs >= minimumTapMs) {
+          if (touchLengthMs < longTapMs) {
+            if (waitingForDoubleTap && ((millis() - firstTapEndTimeMs) < doubleTapWindowMs)) {
+              doubleTapDetected = true;
+              waitingForDoubleTap = false;
+              lastTapTime = millis();
+            } else {
+              waitingForDoubleTap = true;
+              firstTapEndTimeMs = millis();
+            }
+          } else {
+            longTapDetected = true;
             waitingForDoubleTap = false;
             lastTapTime = millis();
-          } else {
-            waitingForDoubleTap = true;
-            firstTapEndTimeMs = millis();
           }
-        } else {
-          longTapDetected = true;
-          waitingForDoubleTap = false;
-          lastTapTime = millis();
         }
       }
     }

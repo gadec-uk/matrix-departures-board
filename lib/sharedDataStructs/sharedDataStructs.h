@@ -60,7 +60,7 @@ struct rdService {
   char serviceId[MAXSERVICEIDSIZE];
   int serviceType;
   int timeToStation;  // Only for TfL
-  bool atPlatform;  // Only for TfL
+  bool atPlatform;
   char destinationNaptan[MAXNAPTANSIZE]; // Only for TfL
   char lineId[MAXLINESIZE]; // Only for TfL
   char currentLocation[MAXBUSTUBELOCATIONSIZE]; // Only for TfL
@@ -103,6 +103,7 @@ struct rdiService {
   int serviceType;
   char serviceID[MAXSERVICEIDSIZE];
   char sortTime[6];
+  bool atPlatform;
 };
 
 struct rdiStation {

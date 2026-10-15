@@ -1246,6 +1246,10 @@ String getBuildTime() {
   return String(buildtime);
 }
 
+int getTimeInMinutes() {
+  return (timeinfo.tm_hour * 60 + timeinfo.tm_min);
+}
+
 void checkPostWebUpgrade() {
   JsonDocument doc;
   char prevFirmware[15] = "B0.0-W0.0";
@@ -1297,7 +1301,7 @@ bool isSnoozing() {
   }
   if (!sleepEnabled) return false;
 
-  int myTime = (timeinfo.tm_hour * 60) + timeinfo.tm_min;
+  int myTime = getTimeInMinutes();
   if (sleepStarts > sleepEnds) {
     if ((myTime >= sleepStarts) || (myTime < sleepEnds)) return true; else return false;
   } else {
@@ -1307,7 +1311,7 @@ bool isSnoozing() {
 
 // Returns true if it's night time
 bool isItNightTime() {
-  int myTime = (timeinfo.tm_hour * 60) + timeinfo.tm_min;
+  int myTime = getTimeInMinutes();
   if (nightTime > dayTime) {
     if ((myTime >= nightTime) || (myTime < dayTime)) return true; else return false;
   } else {
@@ -1403,10 +1407,6 @@ bool pruneFromPhrase(char* input, const char* target) {
       return true;
   }
   return false;
-}
-
-int getTimeInMinutes() {
-  return (timeinfo.tm_hour * 60 + timeinfo.tm_min);
 }
 
 void loadSlot(JsonObjectConst slot, bool isDefault, boardModes requestedMode) {
@@ -1529,7 +1529,9 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["dayTime"].is<const char*>() && sscanf(settings["dayTime"], "%d:%d", &h, &m) == 2) dayTime = (h * 60) + m;
         if (settings["nightTime"].is<const char*>() && sscanf(settings["nightTime"], "%d:%d", &h, &m) == 2) nightTime = (h * 60) + m;
         if (settings["sleepStarts"].is<const char*>() && sscanf(settings["sleepStarts"], "%d:%d", &h, &m) == 2) sleepStarts = (h * 60) + m;
+        else if (settings["sleepStarts"].is<int>()) sleepStarts = settings["sleepStarts"].as<int>() * 60;  // handle legacy setting
         if (settings["sleepEnds"].is<const char*>() && sscanf(settings["sleepEnds"], "%d:%d", &h, &m) == 2) sleepEnds = (h * 60) + m;
+        else if (settings["sleepEnds"].is<int>()) sleepEnds = settings["sleepEnds"].as<int>() * 60;  // handle legacy setting
         if (settings["brightness"].is<int>())         brightness = settings["brightness"];
         if (settings["brightnessNight"].is<int>())    brightnessNight = settings["brightnessNight"];
         if (settings["longPressAction"].is<int>())    longPressAction = settings["longPressAction"];
@@ -3555,13 +3557,23 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
     result = result && addAudioToQueue(announcer, "AN/C", checkPath);
   } else {
     if (station->platformAvailable && station->service[0].platform[0] && (isdigit(station->service[0].platform[0]) || (station->service[0].platform[0] >= 'A' && station->service[0].platform[0] <= 'D')) && strcmp(station->service[0].platform,"BUS")) {
-      // "The next train departing from platform "
-      result = result && addAudioToQueue(announcer, "AN/D", checkPath);
+      if (station->service[0].atPlatform) {
+        // "The train now standing at platform "
+        result = result && addAudioToQueue(announcer, "AN/H", checkPath);
+      } else {
+        // "The next train departing from platform "
+        result = result && addAudioToQueue(announcer, "AN/D", checkPath);
+      }
       // ##
       sprintf(speechFile,"NU/%s",station->service[0].platform);
       result = result && addAudioToQueue(announcer, speechFile, checkPath);
-      // "will be the"
-      result = result && addAudioToQueue(announcer, "AN/W", checkPath);
+      if (station->service[0].atPlatform) {
+        // "is the"
+        result = result && addAudioToQueue(announcer, "AN/I", checkPath);
+      } else {
+        // "will be the"
+        result = result && addAudioToQueue(announcer, "AN/W", checkPath);
+      }
     } else {
       // No platform information available
       if (station->service[0].serviceType == BUS) {

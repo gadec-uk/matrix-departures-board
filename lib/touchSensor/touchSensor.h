@@ -24,6 +24,7 @@ class touchSensor {
     bool longTapDetected = false;
     bool doubleTapDetected = false;
     bool waitingForDoubleTap = false;
+    unsigned long minimumTapMs = 100;
     unsigned long longTapMs = 800;
     unsigned long doubleTapWindowMs = 400;
     unsigned long firstTapEndTimeMs = 0;

@@ -353,6 +353,7 @@ int rdmRailClient::fetchDepartures(rdStation *station, stnMessages *messages, co
       xStation->service[i].serviceType=0;
       xStation->service[i].isCancelled=false;
       xStation->service[i].isDelayed=false;
+      xStation->service[i].atPlatform=false;
     }
     for (int i=0;i<MAXBOARDMESSAGES;++i) strcpy(xMessages->messages[i],"");
     id=0;
@@ -593,6 +594,7 @@ void rdmRailClient::loadDepartures(rdStation *station, stnMessages *messages) {
         strcpy(station->service[i].opcoId, xStation->service[i].opcoId);
         strcpy(station->service[i].serviceId, xStation->service[i].serviceID);
         station->service[i].serviceType = xStation->service[i].serviceType;
+        station->service[i].atPlatform = xStation->service[i].atPlatform;
     }
     if (xStation->numServices) {
         strcpy(station->calling,xStation->service[0].calling);
@@ -610,6 +612,7 @@ int rdmRailClient::getServiceDetails(const char *serviceID, String apiToken) {
     js->lastResultMessage[0] = '\0';
     // Use a spare char buffer space for the last report temporary text
     xStation->service[1].calling[0] = '\0';
+    serviceArrived = false;
 
     // Reset the counters
     WiFiClientSecure httpsClient;
@@ -705,7 +708,14 @@ int rdmRailClient::getServiceDetails(const char *serviceID, String apiToken) {
         strcpy(lastLocation.scheduledTime,thisLocation.scheduledTime);
     }
 
-    if (lastLocation.location[0] && lastLocation.actualTime[0] && lastLocation.scheduledTime[0]) {
+    if (serviceArrived) {
+        xStation->service[0].atPlatform = true;
+        if (xStation->service[0].platform[0]) sprintf(xStation->service[1].calling,".  Currently at platform %s.",xStation->service[0].platform);
+        else strcpy(xStation->service[1].calling,".  Currently at platform.");
+        if ((strlen(xStation->service[0].calling) + strlen(xStation->service[1].calling)) < MAXCALLINGSIZE) {
+            strcat(xStation->service[0].calling, xStation->service[1].calling);
+        }
+    } else if (lastLocation.location[0] && lastLocation.actualTime[0] && lastLocation.scheduledTime[0]) {
         sprintf(xStation->service[1].calling,".  Last seen at %s",lastLocation.location);
         if (strcmp(lastLocation.actualTime,"On ti")==0) {
             sprintf(xStation->service[1].calling + strlen(xStation->service[1].calling)," (%s), on time.",lastLocation.scheduledTime);
@@ -810,10 +820,10 @@ void rdmRailClient::sanitiseData() {
     replaceWord(xMessages->messages[i],MAXMESSAGESIZE,"&amp;","&");
     replaceWord(xMessages->messages[i],MAXMESSAGESIZE,"&quot;","\"");
     // Remove unwanted text at the end of service messages...
-    pruneFromPhrase(xMessages->messages[i]," More details ");
-    pruneFromPhrase(xMessages->messages[i]," Latest information ");
-    pruneFromPhrase(xMessages->messages[i]," Further information ");
-    pruneFromPhrase(xMessages->messages[i]," More information ");
+    pruneFromPhrase(xMessages->messages[i],"More details ");
+    pruneFromPhrase(xMessages->messages[i],"Latest information ");
+    pruneFromPhrase(xMessages->messages[i],"Further information ");
+    pruneFromPhrase(xMessages->messages[i],"More information ");
     trimSpaces(xMessages->messages[i]);
 
     fixFullStop(xMessages->messages[i]);
@@ -1042,7 +1052,7 @@ void rdmRailClient::value(const char *value) {
         } else if (strcmp(js->currentKey, "at")==0 && inCallingArray == 1) {
             strlcpy(thisLocation.actualTime,value,sizeof(thisLocation.actualTime));
             return;
-        }
+        } else if (strcmp(js->currentKey, "ata")==0 && !inCallingArray) serviceArrived = true;
     }
 }
 
