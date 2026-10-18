@@ -268,6 +268,7 @@ static int sleepStarts = 1380;             // Time (in minutes) at which the ove
 static int sleepEnds = 360;                // Time (in minutes) at which the overnight sleep (screensaver) ends
 static int brightness = 20;                // Day time brightness level of the panels
 static int brightnessNight = 20;           // Night time brightness level of the panels
+static int brightnessInteractive;          // Used when changing brightness sliders
 static unsigned long lastWiFiReconnect=0;  // Last WiFi reconnection time (millis)
 static bool firstLoad = true;              // Are we loading for the first time (no station config)?
 static int prevProgressBarPosition=0;      // Used for progress bar smooth animation
@@ -422,7 +423,6 @@ static bool showingMessage = false;
 // TfL/bus specific animation
 static int scrollPrimaryYpos = 0;
 static bool isScrollingPrimary = false;
-static bool attributionScrolled = false;
 
 static char displayedTime[9] = "";        // The currently displayed time
 static char currentTime[9] = "";          // The current time (keep updated in loop)
@@ -556,7 +556,6 @@ bool addAudioToQueue(const char *announcer, const char *audioFilename, bool veri
 
   if (strcmp(audioFilename,"SN/?/???") == 0) return true; // Sometimes NR return ??? as CRS code, ignore these
 
-  char missingFile[24];
   AudioCommand cmd;
   snprintf(cmd.filename, sizeof(cmd.filename), "%s/%s.mp3", announcer, audioFilename, ".mp3");
   cmd.delay = delay;
@@ -1727,8 +1726,6 @@ void softResetBoard(boardModes requestedMode) {
   if (audioInitialised && enableAudioAnnouncements) {
     // Clear the audio queue
     xQueueReset(audioQueue);
-    // set the volume
-    //es.WriteReg(0x32,audioVolume);
     resetTubeAudioHistory();
   }
 
@@ -2243,15 +2240,14 @@ void handleFactoryReset(AsyncWebServerRequest *request) {
 // Interactively change the brightness of the panel (called from index.htm)
 void handleBrightness(AsyncWebServerRequest *request) {
   if (request->hasParam("b")) {
-    int level = request->getParam("b")->value().toInt();
-    if (level>0 && level<256) {
-      dma_display->setBrightness(brightness);
-      brightness = level;
+    brightnessInteractive = request->getParam("b")->value().toInt();
+    if (brightnessInteractive>0 && brightnessInteractive<256) {
+      dma_display->setBrightness(brightnessInteractive);
       int rptDelay = 1;
       if (request->hasParam("d")) {
         rptDelay = request->getParam("d")->value().toInt();
       }
-      if (rptDelay) restartTimer.once(rptDelay, []() { dma_display->setBrightness(brightness); });
+      if (rptDelay) restartTimer.once(rptDelay, []() { dma_display->setBrightness(brightnessInteractive); });
       sendResponse(200,"OK",request);
       return;
     }
@@ -3050,7 +3046,7 @@ void drawServiceLine(int line, int y, int offset = 0) {
 
   clip_canvas.fillRect(0,y+offset,SCREEN_WIDTH,CLIP_HEIGHT,RGB565_BLACK);
 
-  if (line<station->numServices) {
+  if (line<station->numServices && line>=0) {
     if (hideOrdinals) {
       drawStr(0,offset,colours[RAIL_DEPARTURETIME],station->service[line].sTime,RAIL9);
       destPos = getStringWidth(station->service[line].sTime);
@@ -3134,13 +3130,11 @@ void drawStationBoard() {
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    //dma_display->setBrightness(brightness);
-    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
     configDayNight();
     firstLoad=false;
     line3Service = noScrolling ? 1 : 0;
   } else {
-    // Clear the top lines
+    // Clear the top line
     blankArea(0,LINE1,SCREEN_WIDTH,CLIP_HEIGHT);
   }
 
@@ -3310,7 +3304,7 @@ void drawUndergroundService(int serviceId, int y, int offset, bool isShowingCurr
 
   clip_canvas.fillRect(0,offset,SCREEN_WIDTH,CLIP_HEIGHT,RGB565_BLACK);
 
-  if (serviceId < station->numServices) {
+  if (serviceId < station->numServices && serviceId >= 0) {
     if (!station->service[serviceId].atPlatform) {
       if (station->service[serviceId].timeToStation <= 40) {
         usedSpace += 18;
@@ -3347,15 +3341,10 @@ void drawUndergroundService(int serviceId, int y, int offset, bool isShowingCurr
 // Draw/update the Underground Arrivals Board
 void drawUndergroundBoard() {
 
-  if (lastUpdateResult == UPD_SUCCESS) {
-    if (line3Service==0) line3Service=1;
-    attributionScrolled=false;
-  }
+  if (lastUpdateResult == UPD_SUCCESS && line3Service==0) line3Service=1;
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    //dma_display->setBrightness(brightness);
-    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
     configDayNight();
     firstLoad=false;
   } else {
@@ -3443,7 +3432,7 @@ void drawBusService(int serviceId, int offset, int destPos) {
   char clipDestination[MAXLOCATIONSIZE];
   char etd[16];
 
-  if (serviceId < station->numServices) {
+  if (serviceId < station->numServices && serviceId >= 0) {
     clip_canvas.fillRect(0,offset,SCREEN_WIDTH,CLIP_HEIGHT,RGB565_BLACK);
     drawStr(0,offset,colours[BUS_SERVICE],station->service[serviceId].via,RAIL9);
     int etdWidth = 21;
@@ -3474,17 +3463,15 @@ void drawBusService(int serviceId, int offset, int destPos) {
 // Draw/update the Bus Departures Board
 void drawBusDeparturesBoard() {
 
-  if (line3Service==0) line3Service=1;
+  if (lastUpdateResult == UPD_SUCCESS && line3Service==0) line3Service=1;
   if (firstLoad) {
     // Clear the entire screen for the first load since boot up/wake from sleep
     clearCanvas();
-    //dma_display->setBrightness(brightness);
-    //restartTimer.once(1, []() { dma_display->setBrightness(brightness); });
     configDayNight();
     firstLoad=false;
   } else {
-      // Clear the top two lines
-      blankArea(0,LINE1,SCREEN_WIDTH,LINE3-LINE1);
+    // Clear the top two lines
+    blankArea(0,LINE1,SCREEN_WIDTH,LINE3-LINE1);
   }
 
   if (station->boardChanged) {
@@ -3494,10 +3481,17 @@ void drawBusDeparturesBoard() {
     // reset line3
     if (station->numServices>2) {
       line3Service=2;
+      currentMessage = -1;
     } else {
+      // Force third line to scroll messages initially (<3 services)
       line3Service=99;
+      prevService=99;
+      isScrollingService = true;
+      scrollServiceYpos = 11;
+      currentMessage=0;
+      prevMessage=-1;
     }
-    currentMessage = -1;
+
     blankArea(0,LINE3,SCREEN_WIDTH,CLIP_HEIGHT);
     serviceTimer=0;
   } else {
@@ -3871,24 +3865,16 @@ void departureBoardLoop() {
 
   if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noServiceClockIsActive && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
     // Need to change to the next service if there is one
-    if ((station->numServices <= 1 || (station->numServices==2 && noScrolling)) && !weatherMsg[0] && !showStationName) {
-      // There's no other services and no weather so just so static attribution.
-      drawServiceLine(1+((station->numServices==2 && noScrolling)?1:0),0,0);
-      pushClipAtLine(LINE3);
-      serviceTimer = millis() + 30000;
-      isScrollingService = false;
+    if (prevService==-2) prevService=-1; else prevService = line3Service;
+    line3Service++;
+    int maxServiceLines = station->numServices + ((weatherEnabled && weatherMsg[0])?1:0) + (showStationName?1:0) + 1;
+    if (station->numServices) {
+      if (line3Service>maxServiceLines) line3Service=(noScrolling && station->numServices>1) ? 2:1;  // First 'other' service
     } else {
-      if (prevService==-2) prevService=-1; else prevService = line3Service;
-      line3Service++;
-      int maxServiceLines = station->numServices + ((weatherEnabled && weatherMsg[0])?1:0) + (showStationName?1:0) + 1;
-      if (station->numServices) {
-        if (line3Service>maxServiceLines) line3Service=(noScrolling && station->numServices>1) ? 2:1;  // First 'other' service
-      } else {
-        if (line3Service>maxServiceLines) line3Service=0;
-      }
-      scrollServiceYpos=10;
-      isScrollingService = true;
+      if (line3Service>maxServiceLines) line3Service=0;
     }
+    scrollServiceYpos=10;
+    isScrollingService = true;
   }
 
   if (isScrollingStops && millis()>timer && !isSleeping && !noScrolling && !noServiceClockIsActive) {
@@ -4083,38 +4069,32 @@ void undergroundArrivalsLoop() {
 
   // Scrolling the additional services
   if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
-    if (station->numServices<=2 && numMessages==1 && attributionScrolled) {
-      // There are no additional services to scroll in so static attribution.
-      serviceTimer = millis() + 30000;
-    } else {
-      // Need to change to the next service or message if there is one
-      attributionScrolled = true;
-      prevService = line3Service;
-      line3Service++;
-      scrollServiceYpos=11;
-      scrollStopsXpos=0;
-      isScrollingService = true;
+    // Need to change to the next service or message if there is one
+    prevService = line3Service;
+    line3Service++;
+    scrollServiceYpos=11;
+    scrollStopsXpos=0;
+    isScrollingService = true;
 
-      if (line3Service>=station->numServices) {
-        // Showing the messages
-        prevMessage = currentMessage;
-        prevScrollStopsLength = scrollStopsLength;  // Save the length of the previous message
-        currentMessage++;
+    if (line3Service>=station->numServices) {
+      // Showing the messages
+      prevMessage = currentMessage;
+      prevScrollStopsLength = scrollStopsLength;  // Save the length of the previous message
+      currentMessage++;
 
-        if (currentMessage>=numMessages) {
-          if (station->numServices>2) {
-            line3Service=2;
-            currentMessage=-1; // Rollover back to services
-          } else {
-            line3Service = station->numServices;
-            currentMessage=0;
-          }
+      if (currentMessage>=numMessages) {
+        if (station->numServices>2) {
+          line3Service=2;
+          currentMessage=-1; // Rollover back to services
+        } else {
+          line3Service = station->numServices;
+          currentMessage=0;
         }
-        setBoardFont(RAIL9,u8g2_clip);
-        scrollStopsLength = getStringWidth(line2[currentMessage]);
-      } else {
-        scrollStopsLength=SCREEN_WIDTH;
       }
+      setBoardFont(RAIL9,u8g2_clip);
+      scrollStopsLength = getStringWidth(line2[currentMessage]);
+    } else {
+      scrollStopsLength=SCREEN_WIDTH;
     }
   }
 
@@ -4272,35 +4252,28 @@ void busDeparturesLoop() {
 
   // Scrolling the additional services
   if (millis()>serviceTimer && !isScrollingPrimary && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
-    // Need to change to the next service if there is one
-    if (station->numServices<=2 && messages->numMessages==1) {
-      // There are no additional services or weather to scroll in so static attribution.
-      serviceTimer = millis() + 10000;
-      line3Service=station->numServices;
-    } else {
-      // Need to change to the next service or message
-      prevService = line3Service;
-      line3Service++;
-      scrollServiceYpos=11;
-      isScrollingService = true;
-      if (line3Service>=station->numServices) {
-        // Showing the messages
-        prevMessage = currentMessage;
-        currentMessage++;
-        if (currentMessage>=messages->numMessages) {
-          if (station->numServices>2) {
-            line3Service = 2;
-            currentMessage=-1; // Rollover back to services
-          } else {
-            line3Service = station->numServices;
-            currentMessage=0;
-          }
+    // Need to change to the next service or message
+    prevService = line3Service;
+    line3Service++;
+    scrollServiceYpos=11;
+    isScrollingService = true;
+    if (line3Service>=station->numServices) {
+      // Showing the messages
+      prevMessage = currentMessage;
+      currentMessage++;
+      if (currentMessage>=messages->numMessages) {
+        if (station->numServices>2) {
+          line3Service = 2;
+          currentMessage=-1; // Rollover back to services
+        } else {
+          line3Service = station->numServices;
+          currentMessage=0;
         }
       }
     }
   }
 
-  if (isScrollingService && millis()>serviceTimer && !isSleeping) {
+  if (isScrollingService && !isSleeping) {
     clip_canvas.fillScreen(RGB565_BLACK);
     timeIsDisplayed = false;
     if (scrollServiceYpos) {
@@ -4310,10 +4283,12 @@ void busDeparturesLoop() {
         drawBusService(prevService,scrollServiceYpos-12,busDestX);
       } else {
         // Scrolling up the previous message
-        if (strcmp(line2[prevMessage],"88:88:88")==0) { drawStr(clockX,scrollServiceYpos-12,colours[BUS_CLOCK],currentTime,TUBECLOCK8); }
-        else if (showStationName && prevService == station->numServices) centreText(line2[prevMessage],scrollServiceYpos-12,colours[BUS_STATION],stationNameFont);
-        else if (line2[prevMessage][0] == '%') centreText(weatherMsg,scrollServiceYpos-12,colours[BUS_WEATHER],RAIL9);
-        else centreText(line2[prevMessage],scrollServiceYpos-12,colours[BUS_MESSAGES],RAIL9);
+        if (prevMessage>=0) {
+          if (strcmp(line2[prevMessage],"88:88:88")==0) { drawStr(clockX,scrollServiceYpos-12,colours[BUS_CLOCK],currentTime,TUBECLOCK8); }
+          else if (showStationName && prevService == station->numServices) centreText(line2[prevMessage],scrollServiceYpos-12,colours[BUS_STATION],stationNameFont);
+          else if (line2[prevMessage][0] == '%') centreText(weatherMsg,scrollServiceYpos-12,colours[BUS_WEATHER],RAIL9);
+          else centreText(line2[prevMessage],scrollServiceYpos-12,colours[BUS_MESSAGES],RAIL9);
+        }
       }
       // Is this entry a service?
       if (line3Service<station->numServices) {
@@ -4355,8 +4330,8 @@ void busDeparturesLoop() {
     if (station->numServices>2) {
       clip_canvas.fillScreen(RGB565_BLACK);
       drawBusService(2,scrollPrimaryYpos-1,busDestX);
+      pushClipAtLine(LINE3);
     }
-    pushClipAtLine(LINE3);
     scrollPrimaryYpos--;
     if (scrollPrimaryYpos==0) {
       isScrollingPrimary=false;
@@ -4939,9 +4914,8 @@ void loop() {
   bool wasSleeping = isSleeping;
   isSleeping = isSnoozing();
 
-  if (isSleeping && !useNSEclockForSleep && !NSEclockIsActive && millis()>timer) {
-    if (!wasSleeping) panel->clearScreen();
-    timer=millis() + SCREENSAVERINTERVAL;
+  if (isSleeping && !useNSEclockForSleep && !NSEclockIsActive) {
+    if (!wasSleeping) panel->clearScreen(); // Enter sleep
   } else if (wasSleeping && !isSleeping) {
     // Exit sleep mode cleanly
     softResetBoard(MODE_LOADCONFIG);
