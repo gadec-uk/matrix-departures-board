@@ -48,6 +48,7 @@ class rdmRailClient: public JsonListenerGS {
         int coaches=0;
         int numStoppingPoints=0;
         bool serviceArrived = false;
+        bool addCallingTimes;
 
         bool firstDataLoad;
 
@@ -58,6 +59,7 @@ class rdmRailClient: public JsonListenerGS {
         char stcp[6];
         char *endCAL;
         char *endCALcrs;
+        int catPos;
 
         static bool compareTimes(const rdiService& a, const rdiService& b);
         void removeHtmlTags(char* input);
@@ -88,6 +90,6 @@ class rdmRailClient: public JsonListenerGS {
         rdmRailClient(rdiStation *station, stnMessages *messages, sharedBufferSpace *sharedBuffer);
         void cleanFilter(const char* rawFilter, char* cleanedFilter, size_t maxLen);
         int timeDiff(const char *scheduled, const char *actual);
-        int fetchDepartures(rdStation *station, stnMessages *messages, const char *crsCode, String departuresApiKey, String serviceApiKey, int numRows, bool includeBusServices, const char *callingCrsCode, const char *platforms, int timeOffset, bool fetchLastSeen, bool includeServiceMessages);
+        int fetchDepartures(rdStation *station, stnMessages *messages, const char *crsCode, String departuresApiKey, String serviceApiKey, int numRows, bool includeBusServices, const char *callingCrsCode, const char *platforms, int timeOffset, bool fetchLastSeen, bool includeServiceMessages, bool includeCallingTimes);
         void loadDepartures(rdStation *station, stnMessages *messages);
 };

@@ -289,6 +289,7 @@ static String timezone = "";               // custom (non UK) timezone for the c
 static bool hidePlatform = false;          // Hide platform numbers on Rail board?
 static bool hideOrdinals = false;          // Hide service ordinals (2nd, 3rd, 4th etc.)
 static bool showLastSeen = false;          // Include last reported arrival after the calling at list
+static bool showCallingTimes = true;       // Add scheduled/expected times to calling at list
 static bool showFullCalling = true;        // Wait for the "Calling at" list to finish scrolling before changing the primary service
 static bool showFullMsgs = true;           // Wait for the current service message or RSS feed to finish scrolling before changing primary service
 static bool showServiceMsgs = true;        // Show station and service messages (rail/tube)
@@ -1548,6 +1549,7 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["nrTimeOffset"].is<int>())       nrTimeOffset = settings["nrTimeOffset"];
         if (settings["hidePlatform"].is<bool>())      hidePlatform = settings["hidePlatform"];
         if (settings["hideOrdinals"].is<bool>())      hideOrdinals = settings["hideOrdinals"];
+        if (settings["showCallingTimes"].is<bool>())  showCallingTimes = settings["showCallingTimes"];
         if (settings["showLastSeen"].is<bool>())      showLastSeen = settings["showLastSeen"];
         if (settings["maxRailServices"].is<int>())    maxRailServices = settings["maxRailServices"];
         if (settings["showTubeLocation"].is<bool>())  showTubeCurrentLocation = settings["showTubeLocation"];
@@ -4373,9 +4375,9 @@ void fetchDeparturesTask(void *pvParameters) {
         switch (boardMode) {
           case MODE_RAIL:
             if (useRDMclient) {
-              lastUpdateResult = rdmRailData->fetchDepartures(station,messages,locationCode,rdmDeparturesApiKey,rdmServiceApiKey,MAXBOARDSERVICES,enableBus,callingCrsCode,locationCleanFilter,nrTimeOffset,(showLastSeen && !noScrolling),showServiceMsgs);
+              lastUpdateResult = rdmRailData->fetchDepartures(station,messages,locationCode,rdmDeparturesApiKey,rdmServiceApiKey,MAXBOARDSERVICES,enableBus,callingCrsCode,locationCleanFilter,nrTimeOffset,(showLastSeen && !noScrolling),showServiceMsgs,showCallingTimes);
             } else {
-              lastUpdateResult = darwinRailData->fetchDepartures(station,messages,locationCode,nrToken,MAXBOARDSERVICES,enableBus,callingCrsCode,locationCleanFilter,nrTimeOffset,(showLastSeen && !noScrolling),showServiceMsgs);
+              lastUpdateResult = darwinRailData->fetchDepartures(station,messages,locationCode,nrToken,MAXBOARDSERVICES,enableBus,callingCrsCode,locationCleanFilter,nrTimeOffset,(showLastSeen && !noScrolling),showServiceMsgs,showCallingTimes);
             }
             nextDataUpdate = millis()+apiRefreshRate;
             break;

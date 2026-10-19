@@ -56,12 +56,14 @@ class raildataXmlClient: public xmlListener {
         int coaches=0;
         int numStoppingPoints=0;
         bool serviceArrived = false;
+        bool addCallingTimes;
 
         bool firstDataLoad;
         bool endXml;
         char stcp[6];
         char *endCAL;
         char *endCALcrs;
+        int catPos;
 
         char platformFilter[MAXPLATFORMFILTERSIZE];
         bool filterPlatforms = false;
@@ -93,6 +95,6 @@ class raildataXmlClient: public xmlListener {
         raildataXmlClient(rdiStation *station, stnMessages *messages, sharedBufferSpace *sharedBuffer);
         int init(const char *wsdlHost, const char *wsdlAPI);
         void cleanFilter(const char* rawFilter, char* cleanedFilter, size_t maxLen);
-        int fetchDepartures(rdStation *station, stnMessages *messages, const char *crsCode, const char *customToken, int numRows, bool includeBusServices, const char *callingCrsCode, const char *platforms, int timeOffset, bool fetchLastSeen, bool includeServiceMessages);
+        int fetchDepartures(rdStation *station, stnMessages *messages, const char *crsCode, const char *customToken, int numRows, bool includeBusServices, const char *callingCrsCode, const char *platforms, int timeOffset, bool fetchLastSeen, bool includeServiceMessages, bool includeCallingTimes);
         void loadDepartures(rdStation *station, stnMessages *messages);
 };
