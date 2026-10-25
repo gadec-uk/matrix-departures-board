@@ -796,6 +796,25 @@ void drawStr(int x, int y, uint16_t colour, const char *buff, boardFonts fontId,
     u8g2Engine.print(buff);
 }
 
+void drawCallingStr(int x, int y, uint16_t colour, const char *buff, boardFonts fontId, U8G2_FOR_ADAFRUIT_GFX &u8g2Engine = u8g2_clip) {
+    u8g2Engine.setForegroundColor(colour);
+    setBoardFont(fontId, u8g2Engine);
+    u8g2Engine.setCursor(x,y+FONT_HEIGHT);
+    int len = strlen(buff);
+    for (int i=0;i<len;i++) {
+      if (buff[i] == '\x9A') {
+        u8g2Engine.setForegroundColor(colours[RAIL_ONTIME]);
+        u8g2Engine.print('(');
+      } else if (buff[i] == '\x9B') {
+        u8g2Engine.setForegroundColor(colours[RAIL_EXPECTED]);
+        u8g2Engine.print('(');
+      } else if (buff[i] == '\x9C') {
+        u8g2Engine.print(')');
+        u8g2Engine.setForegroundColor(colour);
+      } else u8g2Engine.print(buff[i]);
+    }
+}
+
 void drawTruncatedText(const char *message, int y, int x, uint16_t colour, boardFonts fontId, U8G2_FOR_ADAFRUIT_GFX &u8g2Engine = u8g2_clip) {
   char buff[strlen(message)+4];
   int maxWidth = SCREEN_WIDTH - 6 - x;
@@ -2657,7 +2676,7 @@ bool spDownload(ManifestEntry& entry, const char *installedPacks) {
 }
 
 void deleteLocalSpeechPackFile(const char *path) {
-  log_i("%s is no longer needed and could be deleted");
+  log_i("%s is no longer needed and could be deleted",path);
 }
 
 bool parseManifestEntry(const String& line, ManifestEntry& entry) {
@@ -3531,12 +3550,6 @@ void updateBusDepartures() {
   messages->numMessages=msgIndex;
 }
 
-
-/*
- * Setup / Loop functions
-*/
-
-
 bool playPrimaryService(const char *announcer, bool checkPath = true) {
 
   char speechFile[24];
@@ -3796,7 +3809,7 @@ void departureBoardLoop() {
       if (!station->service[0].via[0]) isShowingVia=false;
       drawPrimaryService(isShowingVia);
       sendBuffer();
-      if (station->calling[0] && showFullCalling) {
+      if (station->calling[0] && !noScrolling) {
         for (int i=0;i<numMessages;i++) {
           if (strncmp("Calling",line2[i],7)==0) {
             // refresh the calling at times
@@ -3813,7 +3826,7 @@ void departureBoardLoop() {
   }
 
   if (fetchComplete && lastUpdateResult != UPD_SEC_CHANGE && !isScrollingService && !isSleeping) {
-    if (!isScrollingStops || (!showFullCalling && isShowingCalling) || (!showFullMsgs && !isShowingCalling)) {
+    if ((!isScrollingStops && millis()>=timer) || (!showFullCalling && isShowingCalling) || (!showFullMsgs && !isShowingCalling)) {
       fetchComplete = false;
       // Get the update data if there is any
       if (lastUpdateResult == UPD_SUCCESS) {
@@ -3887,20 +3900,21 @@ void departureBoardLoop() {
       // if the previous message didn't scroll then we need to scroll it up off the screen
       if (prevScrollStopsLength && prevScrollStopsLength<SCREEN_WIDTH) {
         if (strncmp("Calling",line2[prevMessage],7)) centreText(line2[prevMessage],scrollStopsYpos-12,(prevMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],RAIL9);
-        else drawStr(0,scrollStopsYpos-12,colours[RAIL_CALLING],line2[prevMessage],RAIL9); // Handle very short calling at lists
+        else drawCallingStr(0,scrollStopsYpos-12,colours[RAIL_CALLING],line2[prevMessage],RAIL9); // Handle very short calling at lists
       }
       if (scrollStopsLength<SCREEN_WIDTH && !isCalling) centreText(line2[currentMessage],scrollStopsYpos-1,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],RAIL9); // Centre text if it fits
-      else if (isCalling) drawStr(0,scrollStopsYpos-1,colours[RAIL_CALLING],line2[currentMessage],RAIL9);
+      else if (isCalling) drawCallingStr(0,scrollStopsYpos-1,colours[RAIL_CALLING],line2[currentMessage],RAIL9);
       else drawStr(0,scrollStopsYpos-1,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
       scrollStopsYpos--;
       if (scrollStopsYpos==0) timer=millis()+1500;
     } else {
       // we're scrolling left
       if (scrollStopsLength<SCREEN_WIDTH && !isCalling) centreText(line2[currentMessage],0,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],RAIL9); // Centre text if it fits
-      else drawStr(scrollStopsXpos,0,isCalling?colours[RAIL_CALLING]:(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
+      else if (isCalling) drawCallingStr(scrollStopsXpos,0,isCalling?colours[RAIL_CALLING]:(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
+      else drawStr(scrollStopsXpos,0,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
       if (scrollStopsLength < SCREEN_WIDTH) {
         // we don't need to scroll this message, it fits so just set a longer timer
-        timer=millis()+6000;
+        timer=millis()+5000;
         isScrollingStops=false;
       } else {
         scrollStopsXpos--;
@@ -4447,6 +4461,10 @@ void AudioTask(void *pvParameters) {
         taskYIELD();
     }
 }
+
+/*
+ * Setup / Loop functions
+*/
 
 void setup() {
 

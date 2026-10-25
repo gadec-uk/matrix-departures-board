@@ -103,6 +103,7 @@ struct rdiService {
   int serviceType;
   char serviceID[MAXSERVICEIDSIZE];
   char sortTime[6];
+  int sortOrder;
   bool atPlatform;
 };
 
