@@ -114,6 +114,8 @@ VirtualMatrixPanel  *panel = nullptr;
 #define CLIP_HEIGHT 10
 byte FONT_HEIGHT;
 
+#define MAX_IGNORED_ERRORS 4
+
 // Audio
 #define MAX_QUEUE_SIZE 60
 #define SAMPLE_RATE 22050
@@ -276,7 +278,8 @@ static int startupProgressPercent;         // Initialisation progress
 static bool wifiConnected = false;         // Connected to WiFi?
 volatile unsigned long nextDataUpdate = 0; // Next National Rail update time (millis)
 static int dataLoadSuccess = 0;            // Count of successful data downloads
-static int dataLoadFailure = 0;            // Count of failed data downloads
+static int dataLoadFailure = 0;            // Count of failed data downloads since last success
+static int dataLoadFailureTotal = 0;       // Total number of failed data downloads
 static unsigned long lastLoadFailure = 0;  // When the last failure occurred
 static bool noDataLoaded = true;           // True if no data received for the location
 static unsigned long lastDataLoadTime = 0; // Timestamp of last data load
@@ -1027,22 +1030,30 @@ void showSetupScreen() {
 
 void showNoDataScreen() {
   noServiceClockIsActive = false;
+  isScrollingPrimary = false;
+  isScrollingService = false;
+  isScrollingStops = false;
+  timeIsDisplayed = false;
+  firstLoad = true;
+  noDataLoaded = true;
+  station->numServices = 0;
   clearCanvas();
   char msg[60];
   switch (boardMode) {
     case MODE_RAIL:
-      sprintf(msg,"No data for station ~r\"%s\"~w.",locationCode);
+      sprintf(msg,"No data for station code ~r\"%s\"~w.",locationCode);
       break;
     case MODE_TUBE:
-      strcpy(msg,"No data for selected station.");
+      strcpy(msg,"No data for selected tube station.");
       break;
     case MODE_BUS:
       strcpy(msg,"No data for selected bus stop.");
       break;
   }
   centreFmtText(msg,LINE1,RGB565_WHITE,RAIL9,u8g2_main);
-  centreText("Choose a valid location below:",LINE2,RGB565_WHITE,RAIL9,u8g2_main);
-  centreText(myUrl,LINE3,RGB565_LIGHTBLUE,RAIL9,u8g2_main);
+  sprintf(msg,"Data load attempt ~c%d~w result was:",dataLoadFailure);
+  centreFmtText(msg,LINE2,RGB565_WHITE,RAIL9,u8g2_main);
+  centreText(jsonKeyBuffer->lastResultMessage,LINE3,RGB565_RED,RAIL9,u8g2_main);
   sendBuffer();
 }
 
@@ -2186,8 +2197,8 @@ void handleInfo(AsyncWebServerRequest *request) {
   if (schedulerActive) message+="\nScheduler active, next event at " + String(nextSlotEventTime);
   else if (carouselActive) message+="\nCarousel active, next event at " + String(nextSlotEventTime);
 
-  message+="\nCurrent location code: " + String(locationCode) + "\nCurrent location name: " + String(locationName) + "\nSuccessful: " + String(dataLoadSuccess) + "\nFailures: " + String(dataLoadFailure) + "\nTime since last data load: " + String((int)((millis()-lastDataLoadTime)/1000)) + " seconds";
-  if (dataLoadFailure) message+="\nTime since last failure: " + String((int)((millis()-lastLoadFailure)/1000)) + " seconds";
+  message+="\nCurrent location code: " + String(locationCode) + "\nCurrent location name: " + String(locationName) + "\nSuccessful: " + String(dataLoadSuccess) + "\nFailures: " + String(dataLoadFailureTotal) + "\nTime since last data load: " + String((int)((millis()-lastDataLoadTime)/1000)) + " seconds";
+  if (dataLoadFailureTotal) message+="\nTime since last failure: " + String((int)((millis()-lastLoadFailure)/1000)) + " seconds";
 
   message+="\nFetch in progress: ";
   if (fetchInProgress) message+="true"; else message+="false";
@@ -3290,6 +3301,7 @@ void updateRailDepartures() {
   lastDataLoadTime = millis();
   noDataLoaded = false;
   dataLoadSuccess++;
+  dataLoadFailure=0;
   if (station->numServices > maxRailServices) station->numServices = maxRailServices;
 }
 
@@ -3297,12 +3309,12 @@ void waitForFirstLoad() {
   // Wait for the first data load
   while (!fetchComplete) {
     delay(250);
-    if (startupProgressPercent<95) {
+    if (startupProgressPercent<95 && dataLoadFailure < MAX_IGNORED_ERRORS) {
       startupProgressPercent+=5;
       drawProgressBar(startupProgressPercent);
     }
   }
-  drawProgressBar(100);
+  if (dataLoadFailure < MAX_IGNORED_ERRORS) drawProgressBar(100);
 }
 
 /*
@@ -3315,6 +3327,7 @@ void updateArrivals() {
   lastDataLoadTime = millis();
   noDataLoaded = false;
   dataLoadSuccess++;
+  dataLoadFailure = 0;
 }
 
 void drawUndergroundService(int serviceId, int y, int offset, bool isShowingCurrentLocation = false) {
@@ -3533,6 +3546,7 @@ void updateBusDepartures() {
   lastDataLoadTime = millis();
   noDataLoaded = false;
   dataLoadSuccess++;
+  dataLoadFailure = 0;
   // Work out the max column size for service numbers
   busDestX=0;
   setBoardFont(RAIL9,u8g2_clip);
@@ -3841,20 +3855,23 @@ void departureBoardLoop() {
         lastDataLoadTime = millis();
         noDataLoaded = false;
         dataLoadSuccess++;
+        dataLoadFailure=0;
       } else if (lastUpdateResult == UPD_DATA_ERROR || lastUpdateResult == UPD_TIMEOUT || lastUpdateResult == UPD_HTTP_ERROR) {
         lastLoadFailure=millis();
         dataLoadFailure++;
-        if (noDataLoaded) showNoDataScreen();
+        dataLoadFailureTotal++;
+        if (noDataLoaded || dataLoadFailure>MAX_IGNORED_ERRORS) showNoDataScreen();
       } else if (lastUpdateResult == UPD_UNAUTHORISED) {
         showTokenErrorScreen();
         while (true) { delay(1);}
       } else {
         dataLoadFailure++;
+        dataLoadFailureTotal++;
       }
     }
   }
 
-  if (millis()>timer && numMessages && !isScrollingStops && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR && !noScrolling && !noDataLoaded) {
+  if (millis()>timer && numMessages && !isScrollingStops && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noScrolling && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
     // Need to start a new scrolling messages line
     prevMessage = currentMessage;
     prevScrollStopsLength = scrollStopsLength;
@@ -3870,7 +3887,7 @@ void departureBoardLoop() {
 
   // Check if there's a via destination
   if (millis()>viaTimer) {
-    if (station->numServices && station->service[0].via[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
+    if (station->numServices && station->service[0].via[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
       isShowingVia = !isShowingVia;
       drawPrimaryService(isShowingVia);
       sendBuffer();
@@ -3878,7 +3895,7 @@ void departureBoardLoop() {
     }
   }
 
-  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noServiceClockIsActive && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
+  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noServiceClockIsActive && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
     // Need to change to the next service if there is one
     if (prevService==-2) prevService=-1; else prevService = line3Service;
     line3Service++;
@@ -4060,18 +4077,20 @@ void undergroundArrivalsLoop() {
     } else if (lastUpdateResult == UPD_DATA_ERROR || lastUpdateResult == UPD_TIMEOUT || lastUpdateResult == UPD_HTTP_ERROR) {
       lastLoadFailure = millis();
       dataLoadFailure++;
-      if (noDataLoaded) showNoDataScreen(); else drawUndergroundBoard();
+      dataLoadFailureTotal++;
+      if (noDataLoaded || dataLoadFailure>MAX_IGNORED_ERRORS) showNoDataScreen(); else drawUndergroundBoard();
     } else if (lastUpdateResult == UPD_UNAUTHORISED) {
       showTokenErrorScreen();
       while (true) delay(10);
     } else {
       dataLoadFailure++;
+      dataLoadFailureTotal++;
     }
   }
 
   // Check if we're showing currentLocation
   if (showTubeCurrentLocation && millis()>viaTimer) {
-    if (station->numServices && station->service[0].currentLocation[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
+    if (station->numServices && station->service[0].currentLocation[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
       isShowingVia = !isShowingVia;
       drawUndergroundService(0,0,0,isShowingVia);
       pushClipAtLine(ULINE1);
@@ -4084,7 +4103,7 @@ void undergroundArrivalsLoop() {
   }
 
   // Scrolling the additional services
-  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
+  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && dataLoadFailure <= MAX_IGNORED_ERRORS) {
     // Need to change to the next service or message if there is one
     prevService = line3Service;
     line3Service++;
@@ -4257,17 +4276,19 @@ void busDeparturesLoop() {
     } else if (lastUpdateResult == UPD_DATA_ERROR || lastUpdateResult == UPD_TIMEOUT || lastUpdateResult == UPD_HTTP_ERROR) {
       lastLoadFailure = millis();
       dataLoadFailure++;
-      if (noDataLoaded) showNoDataScreen(); else drawBusDeparturesBoard();
+      dataLoadFailureTotal++;
+      if (noDataLoaded || dataLoadFailure>MAX_IGNORED_ERRORS) showNoDataScreen(); else drawBusDeparturesBoard();
     } else if (lastUpdateResult == UPD_UNAUTHORISED) {
       showTokenErrorScreen();
       while (true) delay(10);
     } else {
       dataLoadFailure++;
+      dataLoadFailureTotal++;
     }
   }
 
   // Scrolling the additional services
-  if (millis()>serviceTimer && !isScrollingPrimary && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && lastUpdateResult!=UPD_DATA_ERROR) {
+  if (millis()>serviceTimer && !isScrollingPrimary && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && dataLoadFailure <= MAX_IGNORED_ERRORS) {
     // Need to change to the next service or message
     prevService = line3Service;
     line3Service++;
