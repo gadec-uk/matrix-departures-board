@@ -201,7 +201,12 @@ static const char* problemReasons[] = {
   "change to the timetable",
   "more trains than usual needing",
   "colliding with a bridge",
-  "fire at a station"
+  "fire at a station",
+  "electricity supply",
+  "late from the depot",
+  "shortage of train conductors",
+  "fire on property",
+  "broken rail"
 };
 
 static const size_t NUM_REASONS = sizeof(problemReasons) / sizeof(problemReasons[0]);
@@ -742,7 +747,7 @@ void setBoardFont(boardFonts fontId, U8G2_FOR_ADAFRUIT_GFX &u8g2Engine) {
   switch (fontId) {
     case RAIL9:
       u8g2Engine.setFont(NatRail9x5);
-      FONT_HEIGHT = 9;
+      FONT_HEIGHT = 10;
       break;
     case RAIL9W:
       u8g2Engine.setFont(NatRail9x5W);
@@ -3254,8 +3259,30 @@ void drawStationBoard() {
           if (line2[numMessages][0]) numMessages++;
         }
         if (station->service[0].trainLength) {
-          // Add the number of carriages message
-          sprintf(line2[numMessages],"This train is formed of %d coaches.",station->service[0].trainLength);
+          int p=0;
+          line2[numMessages][p++] = '\xD7'; // Start of train
+          if (station->coach[0].number[0]) {
+            // Detailed formation data available
+            for (int i=0;i<station->service[0].trainLength;++i) {
+              line2[numMessages][p++] = '\xC7';
+              for (int j=0;j<strlen(station->coach[i].number);++j) line2[numMessages][p++] = toupper(station->coach[i].number[j]) + 152;
+              if (station->coach[i].data & 1) line2[numMessages][p++] = '\xD4'; // "1st"
+              if (station->coach[i].data & 8) line2[numMessages][p++] = '\xD3'; // Wheelchair icon
+              else if (station->coach[i].data & 4) line2[numMessages][p++] = '\xD5'; // Toilet icon
+              line2[numMessages][p++] = '\xC7';
+              if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
+            }
+          } else {
+            // Add the number of carriages
+            for (int i=0;i<station->service[0].trainLength;++i) {
+              line2[numMessages][p++] = '\xC7';
+              line2[numMessages][p++] = '\xC7';
+              line2[numMessages][p++] = '\xC7';
+              if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
+            }
+          }
+          line2[numMessages][p++] = '\xD8';
+          line2[numMessages][p] = '\0';
           numMessages++;
         }
       }
@@ -3724,7 +3751,7 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
       for (int i=0;i<NUM_REASONS;++i) {
         if (std::strstr(station->serviceMessage,problemReasons[i])) {
           sprintf(speechFile,"RE/C%02d",i);
-          result = result && addAudioToQueue(announcer, speechFile, checkPath);
+          addAudioToQueue(announcer, speechFile, checkPath); // Don't fail on missing reasons
           break;
         }
       }
@@ -3746,7 +3773,7 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
       for (int i=0;i<NUM_REASONS;++i) {
         if (std::strstr(station->serviceMessage,problemReasons[i])) {
           sprintf(speechFile,"RE/C%02d",i);
-          result = result && addAudioToQueue(announcer, speechFile, checkPath);
+          addAudioToQueue(announcer, speechFile, checkPath); // Don't fail on missing reasons
           break;
         }
       }
@@ -3871,7 +3898,7 @@ void departureBoardLoop() {
     }
   }
 
-  if (millis()>timer && numMessages && !isScrollingStops && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noScrolling && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+  if (millis()>timer && numMessages && !isScrollingStops && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noScrolling && !noDataLoaded) {
     // Need to start a new scrolling messages line
     prevMessage = currentMessage;
     prevScrollStopsLength = scrollStopsLength;
@@ -3887,7 +3914,7 @@ void departureBoardLoop() {
 
   // Check if there's a via destination
   if (millis()>viaTimer) {
-    if (station->numServices && station->service[0].via[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+    if (station->numServices && station->service[0].via[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded) {
       isShowingVia = !isShowingVia;
       drawPrimaryService(isShowingVia);
       sendBuffer();
@@ -3895,7 +3922,7 @@ void departureBoardLoop() {
     }
   }
 
-  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noServiceClockIsActive && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noServiceClockIsActive && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED) {
     // Need to change to the next service if there is one
     if (prevService==-2) prevService=-1; else prevService = line3Service;
     line3Service++;
@@ -3923,7 +3950,10 @@ void departureBoardLoop() {
       else if (isCalling) drawCallingStr(0,scrollStopsYpos-1,colours[RAIL_CALLING],line2[currentMessage],RAIL9);
       else drawStr(0,scrollStopsYpos-1,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
       scrollStopsYpos--;
-      if (scrollStopsYpos==0) timer=millis()+1500;
+      if (scrollStopsYpos==0) {
+        if (line2[currentMessage][0] == '\xD7') timer=millis()+3000;
+        else timer=millis()+1500;
+      }
     } else {
       // we're scrolling left
       if (scrollStopsLength<SCREEN_WIDTH && !isCalling) centreText(line2[currentMessage],0,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],RAIL9); // Centre text if it fits
@@ -3931,7 +3961,8 @@ void departureBoardLoop() {
       else drawStr(scrollStopsXpos,0,(currentMessage<=lastSvcDescMessage)?colours[RAIL_SERVICEITEMS]:colours[RAIL_MESSAGES],line2[currentMessage],RAIL9);
       if (scrollStopsLength < SCREEN_WIDTH) {
         // we don't need to scroll this message, it fits so just set a longer timer
-        timer=millis()+5000;
+        if (line2[currentMessage][0] == '\xD7') timer=millis()+8000;
+        else timer=millis()+5000;
         isScrollingStops=false;
       } else {
         scrollStopsXpos--;
@@ -4090,7 +4121,7 @@ void undergroundArrivalsLoop() {
 
   // Check if we're showing currentLocation
   if (showTubeCurrentLocation && millis()>viaTimer) {
-    if (station->numServices && station->service[0].currentLocation[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+    if (station->numServices && station->service[0].currentLocation[0] && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noDataLoaded) {
       isShowingVia = !isShowingVia;
       drawUndergroundService(0,0,0,isShowingVia);
       pushClipAtLine(ULINE1);
@@ -4103,7 +4134,7 @@ void undergroundArrivalsLoop() {
   }
 
   // Scrolling the additional services
-  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+  if (millis()>serviceTimer && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED) {
     // Need to change to the next service or message if there is one
     prevService = line3Service;
     line3Service++;
@@ -4288,7 +4319,7 @@ void busDeparturesLoop() {
   }
 
   // Scrolling the additional services
-  if (millis()>serviceTimer && !isScrollingPrimary && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED && dataLoadFailure <= MAX_IGNORED_ERRORS) {
+  if (millis()>serviceTimer && !isScrollingPrimary && !isScrollingService && !isSleeping && !noDataLoaded && lastUpdateResult!=UPD_UNAUTHORISED) {
     // Need to change to the next service or message
     prevService = line3Service;
     line3Service++;

@@ -24,6 +24,7 @@
 #define MAXTUBEBUSREADSERVICES 40
 #define MAXNAPTANSIZE 13
 #define MAXSERVICEIDSIZE 18
+#define MAXCOACHESPERSERVICE 18
 
 #define MAXKEYNAMESIZE 50
 #define MAXRESULTMESSAGESIZE 80
@@ -40,6 +41,11 @@
 struct stnMessages {
   int numMessages;
   char messages[MAXBOARDMESSAGES][MAXMESSAGESIZE];
+};
+
+struct coaches {
+  char number[4];
+  byte data;
 };
 
 struct rdService {
@@ -74,7 +80,8 @@ struct rdStation {
   char calling[MAXCALLINGSIZE];   // Only store the calling stops for the first service returned
   char callingCrs[MAXCALLINGSIZE];   // Only store the calling stops for the first service returned
   char origin[MAXLOCATIONSIZE]; // Only store the origin for the first service returned
-  char originCrs[4];
+  char originCrs[4]; // Only store the origin for the first service returned
+  coaches coach[MAXCOACHESPERSERVICE];  // Only store coach data for the first service returned
   char serviceMessage[MAXMESSAGESIZE];  // Only store the service message for the first service returned
   rdService service[MAXBOARDSERVICES];
 };
@@ -95,6 +102,7 @@ struct rdiService {
   bool isDelayed;
   int trainLength;
   byte classesAvailable;
+  coaches coach[MAXCOACHESPERSERVICE];
   char opco[MAXOPCOSIZE];
   char opcoId[4];
   char calling[MAXCALLINGSIZE];

@@ -1,9 +1,10 @@
 /*
- * Matrix Departures Board (c) 2026 Gadec Software
+ * Departures Board / Matrix Departures Board / Departures Board +
+ * (c) 2026 Gadec Software
  *
  * raildataXmlClient Library
  *
- * https://github.com/gadec-uk/matrix-departures-board
+ * https://github.com/gadec-uk
  *
  * This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International.
  * To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
@@ -54,6 +55,7 @@ class raildataXmlClient: public xmlListener {
         bool addedStopLocation = false;
         int id=0;
         int coaches=0;
+        int coachID=0;
         int numStoppingPoints=0;
         bool serviceArrived = false;
         bool addCallingTimes;
@@ -63,6 +65,7 @@ class raildataXmlClient: public xmlListener {
         char stcp[6];
         char *endCAL;
         char *endCALcrs;
+        char *prevEndCAL;
         int catPos;
 
         char platformFilter[MAXPLATFORMFILTERSIZE];

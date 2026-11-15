@@ -17,7 +17,8 @@ A table-top version using a 3.12" OLED panel is also available [here](https://gi
 * Optionally only show services calling at a selected railway station.
 * Scheduler and Carousel modes to automatically switch between any combination of railway, tube and bus stops.
 * Displays Network Rail service messages.
-* Train information (operator, class, number of coaches etc.).
+* Train information (operator, number of coaches etc.).
+* Displays coach formation diagrams, including coach numbers, seating class, toilet locations etc. (where provided by the train operating company).
 * Displays up to the next 9 arrivals with time to station (London Underground mode).
 * Optionally display the current location of the train (London Underground mode).
 * TfL station and network service messages (London Underground mode).
@@ -33,7 +34,7 @@ A table-top version using a 3.12" OLED panel is also available [here](https://gi
 
 ![image](https://github.com/user-attachments/assets/ca2b163d-8218-4d8e-8340-42d449b41138)
 
-You can see the board in action in the demonstration video below:
+You can see the board in action in the demonstration video below (some features are not shown as this is a recording of an earlier firmware release):
 
 [![Departures Board Demo Video](https://github.com/user-attachments/assets/ec6a6bbc-593f-402a-b78c-1b2cfda15c2d)](https://youtu.be/gavZ2IEgk8E)
 

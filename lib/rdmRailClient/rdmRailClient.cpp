@@ -1,9 +1,10 @@
 /*
- * Matrix Departures Board (c) 2026 Gadec Software
+ * Departures Board / Matrix Departures Board / Departures Board +
+ * (c) 2026 Gadec Software
  *
  * rdmRailClient Library
  *
- * https://github.com/gadec-uk/matrix-departures-board
+ * https://github.com/gadec-uk
  *
  * This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International.
  * To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
@@ -327,37 +328,43 @@ int rdmRailClient::fetchDepartures(rdStation *station, stnMessages *messages, co
     addedStopLocation = false;
     numStoppingPoints = 0;
     endCAL = nullptr;
+    prevEndCAL = nullptr;
     endCALcrs = nullptr;
     addCallingTimes = includeCallingTimes;
     strcpy(xStation->location,"");
 
     for (int i=0;i<MAXBOARDSERVICES;++i) {
-      strcpy(xStation->service[i].sTime,"");
-      strcpy(xStation->service[i].destination,"");
-      strcpy(xStation->service[i].destinationCrs,"");
-      strcpy(xStation->service[i].via,"");
-      strcpy(xStation->service[i].viaCrs,"");
-      strcpy(xStation->service[i].viaCrs2,"");
-      strcpy(xStation->service[i].origin,"");
-      strcpy(xStation->service[i].originCrs,"");
-      strcpy(xStation->service[i].etd,"");
-      strcpy(xStation->service[i].platform,"");
-      strcpy(xStation->service[i].opco,"");
-      strcpy(xStation->service[i].opcoId,"");
-      strcpy(xStation->service[i].calling,"");
-      strcpy(xStation->service[i].callingCrs,"");
-      strcpy(xStation->service[i].serviceMessage,"");
-      strcpy(xStation->service[i].serviceID,"");
-      xStation->service[i].trainLength=0;
-      xStation->service[i].classesAvailable=0;
-      xStation->service[i].serviceType=0;
-      xStation->service[i].isCancelled=false;
-      xStation->service[i].isDelayed=false;
-      xStation->service[i].atPlatform=false;
+        strcpy(xStation->service[i].sTime,"");
+        strcpy(xStation->service[i].destination,"");
+        strcpy(xStation->service[i].destinationCrs,"");
+        strcpy(xStation->service[i].via,"");
+        strcpy(xStation->service[i].viaCrs,"");
+        strcpy(xStation->service[i].viaCrs2,"");
+        strcpy(xStation->service[i].origin,"");
+        strcpy(xStation->service[i].originCrs,"");
+        strcpy(xStation->service[i].etd,"");
+        strcpy(xStation->service[i].platform,"");
+        strcpy(xStation->service[i].opco,"");
+        strcpy(xStation->service[i].opcoId,"");
+        strcpy(xStation->service[i].calling,"");
+        strcpy(xStation->service[i].callingCrs,"");
+        strcpy(xStation->service[i].serviceMessage,"");
+        strcpy(xStation->service[i].serviceID,"");
+        xStation->service[i].trainLength=0;
+        xStation->service[i].classesAvailable=0;
+        xStation->service[i].serviceType=0;
+        xStation->service[i].isCancelled=false;
+        xStation->service[i].isDelayed=false;
+        xStation->service[i].atPlatform=false;
+        for (int j=0;j<MAXCOACHESPERSERVICE;++j) {
+            strcpy(xStation->service[i].coach[j].number,"");
+            xStation->service[i].coach[j].data = 0;
+        }
     }
     for (int i=0;i<MAXBOARDMESSAGES;++i) strcpy(xMessages->messages[i],"");
     id=0;
     coaches=0;
+    coachID=0;
     stcp[0] = '\0';
 
     WiFiClientSecure httpsClient;
@@ -615,6 +622,10 @@ void rdmRailClient::loadDepartures(rdStation *station, stnMessages *messages) {
         strcpy(station->origin,xStation->service[0].origin);
         strcpy(station->originCrs,xStation->service[0].originCrs);
         strcpy(station->serviceMessage,xStation->service[0].serviceMessage);
+        for (int i=0;i<MAXCOACHESPERSERVICE;++i) {
+            strcpy(station->coach[i].number,xStation->service[0].coach[i].number);
+            station->coach[i].data = xStation->service[0].coach[i].data;
+        }
     }
 }
 
@@ -731,10 +742,10 @@ int rdmRailClient::getServiceDetails(const char *serviceID, String apiToken) {
     } else if (lastLocation.location[0] && lastLocation.actualTime[0] && lastLocation.scheduledTime[0]) {
         sprintf(xStation->service[1].calling,".  Last seen at %s",lastLocation.location);
         if (strcmp(lastLocation.actualTime,"On ti")==0) {
-            sprintf(xStation->service[1].calling + strlen(xStation->service[1].calling)," (%s), on time.",lastLocation.scheduledTime);
+            sprintf(xStation->service[1].calling + strlen(xStation->service[1].calling)," \x9A%s\x9C, on time.",lastLocation.scheduledTime);
         } else if (isdigit(lastLocation.actualTime[0]) && isdigit(lastLocation.scheduledTime[0])) {
             int offMins = timeDiff(lastLocation.scheduledTime,lastLocation.actualTime);
-            sprintf(xStation->service[1].calling + strlen(xStation->service[1].calling)," (%s), %d %s %s.",lastLocation.actualTime, abs(offMins), abs(offMins)==1?"min":"mins", offMins>0?"early":"late");
+            sprintf(xStation->service[1].calling + strlen(xStation->service[1].calling)," \x9B%s\x9C, %d %s %s.",lastLocation.actualTime, abs(offMins), abs(offMins)==1?"min":"mins", offMins>0?"early":"late");
         }
         if ((strlen(xStation->service[0].calling) + strlen(xStation->service[1].calling)) < MAXCALLINGSIZE) {
             strcat(xStation->service[0].calling, xStation->service[1].calling);
@@ -834,6 +845,7 @@ void rdmRailClient::sanitiseData() {
     removeHtmlTags(xMessages->messages[i]);
     replaceWord(xMessages->messages[i],MAXMESSAGESIZE,"&amp;","&");
     replaceWord(xMessages->messages[i],MAXMESSAGESIZE,"&quot;","\"");
+
     // Remove unwanted text at the end of service messages...
     pruneFromPhrase(xMessages->messages[i],"More details ");
     pruneFromPhrase(xMessages->messages[i],"Latest information ");
@@ -897,6 +909,7 @@ void rdmRailClient::value(const char *value) {
     if (fetchingDepartures) {
         if (strcmp(js->currentKey, "locationName")==0 && inCallingArray == 1) {
             // Save the current position of the end of the calling list
+            prevEndCAL = endCAL;
             endCAL = xStation->service[id].calling + strlen(xStation->service[id].calling);
             endCALcrs = xStation->service[id].callingCrs + strlen(xStation->service[id].callingCrs);
             catPos = 0;
@@ -905,7 +918,7 @@ void rdmRailClient::value(const char *value) {
                 // Add the calling point, add a comma prefix if this isn't the first one
                 if (xStation->service[id].calling[0]) {
                     strcat(xStation->service[id].calling,", ");
-                    strcat(xStation->service[id].callingCrs,",");
+                    if (strlen(xStation->service[id].callingCrs) + 1 < sizeof(xStation->service[0].callingCrs)) strcat(xStation->service[id].callingCrs,",");
                 }
                 strcat(xStation->service[id].calling,value);
                 addedStopLocation = true;
@@ -914,7 +927,7 @@ void rdmRailClient::value(const char *value) {
             }
             return;
         } else if (strcmp(js->currentKey, "crs")==0 && inCallingArray == 1 && addedStopLocation) {
-            strcat(xStation->service[id].callingCrs,value);
+            if (strlen(xStation->service[id].callingCrs) + strlen(value) < sizeof(xStation->service[0].callingCrs)) strcat(xStation->service[id].callingCrs,value);
             return;
         } else if (strcmp(js->currentKey, "st")==0 && inCallingArray == 1 && addedStopLocation) {
             // Save the scheduled time of the calling point
@@ -939,16 +952,32 @@ void rdmRailClient::value(const char *value) {
             if (strcmp(value,"true")==0) {
                 // remove this calling point, it's cancelled
                 *endCAL = '\0';
+                endCAL = prevEndCAL;
                 *endCALcrs = '\0';
                 numStoppingPoints--;
             }
             addedStopLocation = false;
             return;
         } else if (strcmp(js->currentKey, "coachClass")==0 && strcmp(js->arrayName, "formation/coaches")==0 && arrayNestLevel==2) {
-            if (strcmp(value,"First")==0) xStation->service[id].classesAvailable = xStation->service[id].classesAvailable | 1;
-            else if (strcmp(value,"Standard")==0) xStation->service[id].classesAvailable = xStation->service[id].classesAvailable | 2;
+            if (coaches) coachID++;
+            if (strcmp(value,"First")==0) {
+                xStation->service[id].classesAvailable = xStation->service[id].classesAvailable | 1;
+                if (coachID < MAXCOACHESPERSERVICE) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 1;
+            } else if (strcmp(value,"Standard")==0) {
+                xStation->service[id].classesAvailable = xStation->service[id].classesAvailable | 2;
+                if (coachID < MAXCOACHESPERSERVICE) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 2;
+            } else if (strcmp(value,"Mixed")==0) {
+                xStation->service[id].classesAvailable = xStation->service[id].classesAvailable | 3;
+                if (coachID < MAXCOACHESPERSERVICE) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 3;
+            }
             coaches++;
             return;
+        } else if (strcmp(js->currentKey, "status")==0 && strcmp(js->arrayName, "formation/coaches")==0 && arrayNestLevel==2) {
+            if (coachID < MAXCOACHESPERSERVICE && strcmp(value,"InService") == 0) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 4;
+        } else if (strcmp(js->currentKey, "Value")==0 && strcmp(js->arrayName, "formation/coaches")==0 && arrayNestLevel==2) {
+            if (coachID < MAXCOACHESPERSERVICE && strcmp(value,"Accessible") == 0) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 8;
+        } else if (strcmp(js->currentKey, "number")==0 && strcmp(js->arrayName, "formation/coaches")==0 && arrayNestLevel==2) {
+            if (coachID < MAXCOACHESPERSERVICE) strlcpy(xStation->service[id].coach[coachID].number,value,sizeof(xStation->service[0].coach[0].number));
         } else if (strcmp(js->currentPath, "/length")==0) {
             xStation->service[id].trainLength = atoi(value);
             return;
@@ -1025,10 +1054,14 @@ void rdmRailClient::value(const char *value) {
                     xStation->service[id].serviceType=0;
                     xStation->service[id].isCancelled=false;
                     xStation->service[id].isDelayed=false;
+                    for (int i=0;i<MAXCOACHESPERSERVICE;++i) {
+                        strcpy(xStation->service[id].coach[i].number,"");
+                        xStation->service[id].coach[i].data = 0;
+                    }
                 } else {
                     if (xStation->service[id].trainLength == 0) xStation->service[id].trainLength = coaches;
                     // If there are multiple stopping points, insert the "and" prior to the final destination
-                    if (numStoppingPoints>1 && endCAL != nullptr && strlen(xStation->service[id].calling) + 4 < sizeof(xStation->service[0].calling)) {
+                    if (numStoppingPoints>1 && endCAL != nullptr && strlen(xStation->service[id].calling) + 5 < sizeof(xStation->service[0].calling)) {
                         size_t tailLen = strlen(endCAL + 2) + 1;
                         memmove(endCAL + 5, endCAL + 2, tailLen);
                         memcpy(endCAL, " and ", 5);
@@ -1039,6 +1072,7 @@ void rdmRailClient::value(const char *value) {
                     id++;
                 }
                 coaches=0;
+                coachID=0;
                 numStoppingPoints=0;
                 keepRoute = false;
                 endCAL = nullptr;
