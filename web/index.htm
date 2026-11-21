@@ -65,6 +65,7 @@
               <li><a class="dropdown-item" id="speechPackMenuItem" href="#" onclick="handleCheckSpeechPacks()">Check for Speech Pack Updates</a></li>
               <li><a class="dropdown-item" href="/keys.htm">Edit API Keys</a></li>
               <li><a class="dropdown-item" href="/editrss.htm">Edit RSS Feeds</a></li>
+              <li><a id="mnuBoardDisplay" class="dropdown-item" href="#" onclick="toggleBoardCapture()">Show Board Display</a></li>
               <li><a class="dropdown-item" href="#" onclick="handleClearWifi()">Clear WiFi Settings</a></li>
               <li><a class="dropdown-item" href="#" onclick="handleRestartSystem()">Restart System</a></li>
             </ul>
@@ -80,6 +81,12 @@
             <label class="btn btn-outline-secondary d-flex align-items-center justify-content-center" for="modeTube"><img src="/itube.webp" class="me-2" alt=""> Tube</label>
             <input type="radio" class="btn-check" name="boardmode" id="modeBus" value="2" autocomplete="off">
             <label class="btn btn-outline-secondary d-flex align-items-center justify-content-center" for="modeBus"><img src="/ibus.webp" class="me-2" alt=""> Bus</label>
+          </div>
+        </div>
+
+        <div class="mb-3" id="screenshot" style="display:none">
+          <div style="border-width:15px; border-color:black; border-style:solid; border-radius:5px;">
+            <img id="boardImage" width="192" style="width:100%; display:block;">
           </div>
         </div>
 
@@ -316,6 +323,21 @@
                     </div>
                   </div>
 
+                  <hr class="my-0 opacity-10">
+                  <div class="py-3">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="showFormation">Show train formation diagrams</label>
+                          <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                          title="Detailed information is shown when provided by the train operator. Not all operators provide this information and not all services have detailed data available."
+                          style="cursor:pointer;"></i>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="showFormation" role="switch">
+                      </div>
+                    </div>
+                  </div>
+
                   <div id="optShowLastSeen" style="display:none">
                     <hr class="my-0 opacity-10">
                     <div class="py-2">
@@ -421,64 +443,80 @@
                   </div>
                 </div>
 
+                <div id="optShowAudio" style="display:none;">
+                  <hr class="my-0 opacity-10">
+                  <div class="py-2">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div>
+                        <label class="form-check-label d-inline-block" for="enableAudio">Enable audio announcements</label>
+                        <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                            title="An SD card with at least one speech-pack installed must be present to enable this option."
+                            style="cursor:pointer;"></i>
+                        <div class="small text-body-secondary">Station announcements for National Rail and Tube</div>
+                      </div>
+                      <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="enableAudio" role="switch">
+                      </div>
+                    </div>
+                  </div>
 
-                <hr class="my-0 opacity-10">
-                <div class="py-2">
-                  <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                      <label class="form-check-label d-inline-block" for="enableAudio">Enable audio announcements</label>
+                  <div id="optAudio" style="display:none;">
+
+                    <hr class="mt-0 mb-2 opacity-10">
+                    <div class="d-flex align-items-center">
+                      <label class="form-label mb-0" for="announcerVoice">Announcer voice:</label>
                       <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
-                          title="An SD card with at least one speech-pack installed must be present to enable this option."
-                          style="cursor:pointer;"></i>
-                      <div class="small text-body-secondary">Station announcements for National Rail and Tube</div>
+                        title="Select the voice to be used for all audio announcements. An SD card with valid speech-pack audio files must be present."
+                        style="cursor:pointer;"></i>
+                      <select id="announcerVoice" class="form-select ms-auto w-auto">
+                      </select>
                     </div>
-                    <div class="form-check form-switch mb-0">
-                      <input class="form-check-input" type="checkbox" id="enableAudio" role="switch">
+
+                    <hr class="mt-2 mb-0 opacity-10">
+                    <div class="py-3">
+                      <label class="form-label" for="volume">Day time audio volume</label>
+                      <input type="range" min="1" max="191" value="70" class="form-range" id="volume">
+                      <label class="form-label" for="volumeNight">Night time audio volume</label>
+                      <input type="range" min="1" max="191" value="70" class="form-range" id="volumeNight">
+                      <div class="form-text">Set the volume level for audio announcements.</div>
                     </div>
-                  </div>
-                </div>
 
-                <div id="optAudio" style="display:none;">
-
-                  <hr class="mt-0 mb-2 opacity-10">
-                  <div class="d-flex align-items-center">
-                    <label class="form-label mb-0" for="announcerVoice">Announcer voice:</label>
-                    <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
-                      title="Select the voice to be used for all audio announcements. An SD card with valid speech-pack audio files must be present."
-                      style="cursor:pointer;"></i>
-                    <select id="announcerVoice" class="form-select ms-auto w-auto">
-                    </select>
-                  </div>
-
-                  <hr class="mt-2 mb-0 opacity-10">
-                  <div class="py-3">
-                    <label class="form-label" for="volume">Day time audio volume</label>
-                    <input type="range" min="1" max="191" value="70" class="form-range" id="volume">
-                    <label class="form-label" for="volumeNight">Night time audio volume</label>
-                    <input type="range" min="1" max="191" value="70" class="form-range" id="volumeNight">
-                    <div class="form-text">Set the volume level for audio announcements.</div>
-                  </div>
-
-                  <hr class="my-0 opacity-10">
-                  <div class="py-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <div>
-                        <label class="form-check-label d-block" for="enableReverb">Enable station reverb effect</label>
-                      </div>
-                      <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="enableReverb" role="switch">
+                    <hr class="my-0 opacity-10">
+                    <div class="py-3">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <label class="form-check-label d-block" for="enableReverb">Enable station reverb effect</label>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input" type="checkbox" id="enableReverb" role="switch">
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <hr class="my-0 opacity-10">
-                  <div class="py-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <div>
-                        <label class="form-check-label d-block" for="enableAudioCalling">Enable "calling at" announcements</label>
-                      </div>
-                      <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="enableAudioCalling" role="switch">
+                    <hr class="my-2 opacity-10">
+                    <div class="d-flex align-items-center">
+                      <label class="form-label mb-0" for="limitTalk">Limit announcement rate:</label>
+                      <i class="bi bi-info-circle ms-1" data-bs-toggle="tooltip" data-bs-placement="right"
+                        title="Select the minimum time between audio announcements (some service announcements may be missed, but this can be less intrusive for busy stations)."
+                        style="cursor:pointer;"></i>
+                      <select id="limitTalk" class="form-select ms-auto w-auto">
+                        <option value="0">No limit</option>
+                        <option value="120">2 minutes</option>
+                        <option value="300">5 minutes</option>
+                        <option value="600">10 minutes</option>
+                        <option value="900">15 minutes</option>
+                      </select>
+                    </div>
+
+                    <hr class="mt-2 mb-0 opacity-10">
+                    <div class="py-3">
+                      <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                          <label class="form-check-label d-block" for="enableAudioCalling">Enable "calling at" announcements</label>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                          <input class="form-check-input" type="checkbox" id="enableAudioCalling" role="switch">
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -986,6 +1024,7 @@
       rssFeeds: [],
       voices: [],
       jsonPrevFirmware: {},
+      boardMirror: false,
       availableThemes: [],
       currentThemeData: [],
       activeThemeFile: ""
@@ -1039,7 +1078,9 @@
       announcerVoice: document.getElementById('announcerVoice'),
       maxRailServices: document.getElementById('maxRailServices'),
       longPressAction: document.getElementById('longPressAction'),
-      doublePressAction: document.getElementById('doublePressAction')
+      doublePressAction: document.getElementById('doublePressAction'),
+      limitTalk: document.getElementById('limitTalk'),
+      boardImage: document.getElementById('boardImage')
     };
 
     document.getElementById('formsettings').addEventListener('keydown', function(e) { if (e.key === 'Enter') e.preventDefault(); });
@@ -2061,6 +2102,7 @@
       show("optDataSource", rail);
       show("optNrTimeOffset", rail);
       show("nrInvalidToken", mode === 0 && !appState.validNatRailToken && !appState.validRdgRailToken);
+      show("optShowAudio", rail || tube);
 
       show("tflT", tube);
       show("tflSearchBox", tube);
@@ -2292,6 +2334,7 @@
       show("optAudio", s.enableAudio);
       setCheckbox("enableReverb", s.enableReverb);
       setCheckbox("enableAudioCalling", s.enableAudioCalling);
+      elements.limitTalk.value = s.limitTalk ?? 0;
 
       setCheckbox("enableSleep", s.sleep);
       setCheckbox("sleepUseBigClock", s.sleepUseBigClock);
@@ -2304,6 +2347,7 @@
       setCheckbox("enableWeather", s.weather);
       setCheckbox("showPlatform", !(s.hidePlatform ?? false));
       setCheckbox("showOrdinals", !(s.hideOrdinals ?? false));
+      setCheckbox("showFormation", (s.showFormation ?? true));
       setCheckbox("showLastSeen", s.showLastSeen);
       setCheckbox("showCallingTimes", (s.showCallingTimes ?? true));
       setCheckbox("showServiceMsgs", s.showServiceMsgs ?? true);
@@ -2513,6 +2557,7 @@
       s.volume = parseInt(elements.volume.value);
       s.volumeNight = parseInt(elements.volumeNight.value);
       s.voice = elements.announcerVoice.value;
+      s.limitTalk = parseInt(elements.limitTalk.value);
       s.showBus = isChecked("enableBuses");
       s.showServiceMsgs = isChecked("showServiceMsgs");
       s.showTubeLocation = isChecked("showTubeLocation");
@@ -2523,6 +2568,7 @@
       s.weather = isChecked("enableWeather");
       s.hidePlatform = !isChecked("showPlatform");
       s.hideOrdinals = !isChecked("showOrdinals");
+      s.showFormation = isChecked("showFormation");
       s.showLastSeen = isChecked("showLastSeen");
       s.showCallingTimes = isChecked("showCallingTimes");
       s.showFullCalling = isChecked("showFullCalling");
@@ -2788,6 +2834,34 @@
           onCancel: () => resolve(false)
         });
       });
+    }
+
+    // Board display in browser
+    let statusInterval = null;
+
+    function toggleBoardCapture() {
+      const boardDisplayDiv = document.getElementById("screenshot");
+      const menu = document.getElementById("mnuBoardDisplay");
+
+      if (!appState.boardMirror) {
+        show("screenshot",true);
+        appState.boardMirror = true;
+        menu.textContent = "Hide Board Display";
+        fetchBoardScreen();
+        statusInterval = setInterval(fetchBoardScreen,10000);
+      } else {
+        show("screenshot",false);
+        appState.boardMirror = false;
+        menu.textContent = "Show Board Display";
+        if (statusInterval) {
+          clearInterval(statusInterval);
+          statusInterval = null;
+        }
+      }
+    }
+
+    function fetchBoardScreen() {
+      elements.boardImage.src = `/screen.bmp?t=${Date.now()}`;
     }
 
   </script>

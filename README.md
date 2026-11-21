@@ -134,6 +134,7 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 - **Show service location** - displays the current location of the next tube train that is due to arrive (Tube mode).
 - **Show platform numbers if available** - deselecting this option will hide platform numbers (National Rail).
 - **Show service ordinal numbers** - displays "2nd","3rd","4th" etc. next to the service times (National Rail).
+- **Show train formation diagrams** - displays train formation diagrams, including coach numbers, seating class, toilet locations etc. (where provided by the train operating company).
 - **Show service last seen location** - adds the last reported location and time of a service to the Calling at list (National Rail).
 - **Include arrival times in Calling at list** - shows the estimated arrival times for each calling stop (National Rail).
 - **Wait for Calling at list to complete** - waits for the Calling at list to finish scrolling before changing the primary service.
@@ -145,6 +146,7 @@ At start-up, the ESP32's IP address is displayed. To change the station or to co
 - **Day time audio volume** - Set the volume level for audio announcements during day time hours.
 - **Night time audio volume** - Set the volume level for audio announcements during night time hours.
 - **Enable station reverb effect** - Enables a reverb (echo) effect for more atmospheric sounding announcements.
+- **Limit announcement rate** - sets the minimum time between spoken announcements.
 - **Enable "calling at" announcements** - The station announcements will read out the full listing of calling stations for a service.
 - **Automatic firmware updates at startup** - automatically checks for AND installs the latest firmware from this repository when the system starts up.
 - **Daily check for firmware updates** - when enabled, the system will check for and install any updates just after midnight if the board is powered on.
@@ -179,6 +181,7 @@ A drop-down menu (top-right) adds the following options:
 - **Check for Speech Pack Updates** - manually checks for and optionally downloads any updates for installed speech packs.
 - **Edit API Keys** - view/edit your National Rail, OpenWeather Map and Transport for London API keys.
 - **Edit RSS Feeds** - loads the RSS Feeds Editor where you can add/edit/delete custom headline feeds.
+- **Show Board Display** - displays a snapshot of the board, updated every ten seconds.
 - **Clear WiFi Settings** - deletes the stored WiFi credentials and restarts in WiFiManager mode (useful to change WiFi network).
 - **Restart System** - restarts the ESP32.
 
@@ -191,7 +194,7 @@ A few other urls have been implemented, primarily for debugging/developer use:
 - **/formatffs** - formats the filing system, erasing the configuration files (but not the WiFi credentials).
 - **/dir** - displays a (basic) directory listing of the file system with the ability to view/delete files.
 - **/upload** - upload a file to the file system.
-- **/control** - an endpoint for automation of sleep mode. Takes optional parameters *sleep* and *clock* - e.g. /control?sleep=1&clock=0 will force sleep mode and turn off the display completely. /control?sleep=0 will revert to normal operation. Always returns current state as json.
+- **/control** - an endpoint for automation. Takes optional parameters *sleep*, *clock* and *mute* - e.g. /control?sleep=1&clock=0 will force sleep mode and turn off the display completely. /control?sleep=0 will revert to normal operation. /control?mute=1 will mute audio and /control?mute=0 will unmute. Always returns current state as json.
 
 ### Bus Stop ATCO codes
 Every UK bus stop has a unique ATCO code number. To find the ATCO code of the stop you want to monitor, go to [bustimes.org/search](https://bustimes.org/search) and type a location in the search box. Select the location from the list of places shown and then select the particular stop you want from the list. The ATCO code is shown on the stop information page. After entering the code in the Departures Board setup screen, tap the **Verify** button and the location will be shown confirming your selection. You must use the **Verify** button *before* you can save changes. Up to ten of the most recently verified ATCO codes are saved and can be selected from a dropdown list for quick access. The bustimes map and search facility are also embedded in the Bus mode configuration screen from firmware B2.3 onwards.

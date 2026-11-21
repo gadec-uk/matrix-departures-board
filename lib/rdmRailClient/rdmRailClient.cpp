@@ -978,7 +978,7 @@ void rdmRailClient::value(const char *value) {
             if (coachID < MAXCOACHESPERSERVICE && strcmp(value,"Accessible") == 0) xStation->service[id].coach[coachID].data = xStation->service[id].coach[coachID].data | 8;
         } else if (strcmp(js->currentKey, "number")==0 && strcmp(js->arrayName, "formation/coaches")==0 && arrayNestLevel==2) {
             if (coachID < MAXCOACHESPERSERVICE) strlcpy(xStation->service[id].coach[coachID].number,value,sizeof(xStation->service[0].coach[0].number));
-        } else if (strcmp(js->currentPath, "/length")==0) {
+        } else if (strcmp(js->currentPath, "/length")==0 && !inCallingArray) {
             xStation->service[id].trainLength = atoi(value);
             return;
         } else if (strcmp(js->currentPath, "/operator")==0) {
@@ -996,7 +996,7 @@ void rdmRailClient::value(const char *value) {
         } else if (strcmp(js->currentPath, "origin/crs")==0) {
             strlcpy(xStation->service[id].originCrs,value,sizeof(xStation->service[0].originCrs));
             return;
-        } else if (strcmp(js->currentPath, "/serviceType")==0) {
+        } else if (strcmp(js->currentPath, "/serviceType")==0 && !inCallingArray) {
             if (strcmp(value,"train")==0) xStation->service[id].serviceType = TRAIN;
             else if (strcmp(value,"bus")==0) xStation->service[id].serviceType = BUS;
             return;
@@ -1015,11 +1015,11 @@ void rdmRailClient::value(const char *value) {
         } else if (strcmp(js->currentPath, "destination/via")==0) {
             strlcpy(xStation->service[id].via,value,sizeof(xStation->service[0].via));
             return;
-        } else if (strcmp(js->currentPath, "/delayReason")==0) {
+        } else if (strcmp(js->currentPath, "/delayReason")==0 && !inCallingArray) {
             strlcpy(xStation->service[id].serviceMessage,value,sizeof(xStation->service[0].serviceMessage));
             xStation->service[id].isDelayed = true;
             return;
-        } else if (strcmp(js->currentPath, "/cancelReason")==0) {
+        } else if (strcmp(js->currentPath, "/cancelReason")==0 && !inCallingArray) {
             strlcpy(xStation->service[id].serviceMessage,value,sizeof(xStation->service[0].serviceMessage));
             xStation->service[id].isCancelled = true;
             return;

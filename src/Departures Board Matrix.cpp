@@ -301,6 +301,7 @@ static bool showCallingTimes = true;       // Add scheduled/expected times to ca
 static bool showFullCalling = true;        // Wait for the "Calling at" list to finish scrolling before changing the primary service
 static bool showFullMsgs = true;           // Wait for the current service message or RSS feed to finish scrolling before changing primary service
 static bool showServiceMsgs = true;        // Show station and service messages (rail/tube)
+static bool showFormation = true;          // Show formation diagrams when available
 static bool padPlatform;                   // Used to align platform nos when no scroll is enabled
 static bool showTubeCurrentLocation=false; // Show the current location of the primary tube service
 static int nrTimeOffset = 0;               // Offset minutes for Rail departures display
@@ -325,6 +326,8 @@ static int audioVolume = 160;              // Day time audio volume
 static int audioVolumeNight = 160;         // Night time audio volume
 static char audioVoice[6] = "/V1";         // Selected audio announcer speechpack
 static bool audioMuted = false;            // Has the user muted the audio
+static unsigned long lastAnnouncement = 0; // Time of last audio announcement
+static unsigned long limitTalk = 0;        // Minimum time (ms) between audio announcements
 static uint8_t cardType = 100;             // SD card type (for info)
 static int numCarouselSlots = 0;
 static int currentCarouselSlot = 0;
@@ -1372,6 +1375,95 @@ void updateMyUrl() {
   snprintf(myUrl,sizeof(myUrl),"http://%u.%u.%u.%u",ip[0],ip[1],ip[2],ip[3]);
 }
 
+void streamCanvasBMP(GFXcanvas16 &canvas, AsyncWebServerRequest *request) {
+  const uint16_t *buf = canvas.getBuffer();
+  if (!buf) {
+    request->send(500, "text/plain", "Canvas buffer unavailable");
+    return;
+  }
+
+  const uint16_t width         = canvas.width();
+  const uint16_t height        = canvas.height();
+  const uint32_t rowStride     = ((width * 3 + 3) / 4) * 4; // 4-byte aligned BGR rows
+  const uint32_t pixelDataSize = rowStride * height;
+  const uint32_t fileSize      = 54 + pixelDataSize;
+
+  // Fixed 54-byte 24-bit BMP header (14B File Header + 40B Info Header)
+  const std::array<uint8_t, 54> header = {{
+    // BITMAPFILEHEADER (14 bytes)
+    'B', 'M',
+    (uint8_t)(fileSize), (uint8_t)(fileSize >> 8),
+    (uint8_t)(fileSize >> 16), (uint8_t)(fileSize >> 24),
+    0, 0, 0, 0,
+    54, 0, 0, 0,
+
+    // BITMAPINFOHEADER (40 bytes)
+    40, 0, 0, 0,
+    (uint8_t)(width), (uint8_t)(width >> 8),
+    (uint8_t)(width >> 16), (uint8_t)(width >> 24),
+    (uint8_t)(height), (uint8_t)(height >> 8),
+    (uint8_t)(height >> 16), (uint8_t)(height >> 24), // +height = bottom-up rows
+    1, 0,                                             // Planes (1)
+    24, 0,                                            // Bits per pixel (24-bit RGB)
+    0, 0, 0, 0,                                       // Compression (0 = BI_RGB)
+    (uint8_t)(pixelDataSize), (uint8_t)(pixelDataSize >> 8),
+    (uint8_t)(pixelDataSize >> 16), (uint8_t)(pixelDataSize >> 24),
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0,
+    0, 0, 0, 0
+  }};
+
+  AsyncWebServerResponse *response = request->beginResponse(
+    "image/bmp",
+    fileSize,
+    [buf, width, height, rowStride, fileSize, header](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+      if (index >= fileSize) return 0;
+
+      const size_t bytesToWrite = (maxLen < (fileSize - index)) ? maxLen : (fileSize - index);
+
+      for (size_t i = 0; i < bytesToWrite; i++) {
+        const size_t pos = index + i;
+
+        if (pos < header.size()) {
+          buffer[i] = header[pos];
+        } else {
+          const size_t   dataOffset = pos - header.size();
+          const uint16_t bmpRow     = dataOffset / rowStride;
+          const uint16_t rowByte    = dataOffset % rowStride;
+          const uint16_t x          = rowByte / 3;
+
+          if (x >= width) {
+            buffer[i] = 0; // Row padding byte
+          } else {
+            const uint16_t y       = (height - 1) - bmpRow;
+            const uint16_t rgb565  = buf[y * width + x];
+            const uint8_t  channel = rowByte % 3;
+
+            // Expand RGB565 to 8-bit BGR
+            if (channel == 0) {        // Blue (5-bit)
+              uint8_t b5 = rgb565 & 0x1F;
+              buffer[i] = (b5 << 3) | (b5 >> 2);
+            } else if (channel == 1) { // Green (6-bit)
+              uint8_t g6 = (rgb565 >> 5) & 0x3F;
+              buffer[i] = (g6 << 2) | (g6 >> 4);
+            } else {                   // Red (5-bit)
+              uint8_t r5 = (rgb565 >> 11) & 0x1F;
+              buffer[i] = (r5 << 3) | (r5 >> 2);
+            }
+          }
+        }
+      }
+
+      return bytesToWrite;
+    }
+  );
+
+  response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  request->send(response);
+}
+
+
 /*
  * Start-up configuration functions
  */
@@ -1548,12 +1640,14 @@ void loadConfig(bool coldBoot = false, boardModes requestedMode = MODE_LOADCONFI
         if (settings["enableReverb"].is<bool>())      enableReverb = settings["enableReverb"];
         if (settings["enableAudioCalling"].is<bool>()) enableAudioCallingList = settings["enableAudioCalling"];
         if (settings["voice"].is<const char*>())      strlcpy(audioVoice, settings["voice"], sizeof(audioVoice));
+        if (settings["limitTalk"].is<int>())          limitTalk = settings["limitTalk"].as<int>() * 1000;
         if (settings["volume"].is<int>())             audioVolume = settings["volume"];
         if (settings["volumeNight"].is<int>())        audioVolumeNight = settings["volumeNight"];
         if (settings["showBus"].is<bool>())           enableBus = settings["showBus"];
         if (settings["showLocation"].is<bool>())      showStationName = settings["showLocation"];
         if (settings["showFullCalling"].is<bool>())   showFullCalling = settings["showFullCalling"];
         if (settings["showFullMsgs"].is<bool>())      showFullMsgs = settings["showFullMsgs"];
+        if (settings["showFormation"].is<bool>())     showFormation = settings["showFormation"];
         if (settings["showClockNoServices"].is<bool>()) showClockNoServices = settings["showClockNoServices"];
         if (settings["sleep"].is<bool>())             sleepEnabled = settings["sleep"];
         if (settings["fastRefresh"].is<bool>())       apiRefreshRate = settings["fastRefresh"] ? FASTDATAUPDATEINTERVAL : DATAUPDATEINTERVAL;
@@ -1983,10 +2077,14 @@ String getContentType(String filename) {
 }
 
 // Stream a file from the file system
-bool handleStreamFile(String filename, AsyncWebServerRequest *request, fs::FS &fs = LittleFS) {
+bool handleStreamFile(String filename, AsyncWebServerRequest *request, fs::FS &fs = LittleFS, bool isGzip = false) {
   if (fs.exists(filename)) {
     String contentType = getContentType(filename);
-    request->send(fs,filename,contentType);
+    AsyncWebServerResponse *response = request->beginResponse(LittleFS, filename, contentType);
+    if (isGzip) {
+      response->addHeader("Content-Encoding", "gzip");
+    }
+    request->send(response);
     return true;
   } else return false;
 }
@@ -2246,7 +2344,7 @@ void handleRoot(AsyncWebServerRequest *request) {
   if (!apiKeys) {
     if (LittleFS.exists("/keys.htm")) handleStreamFile("/keys.htm",request); else handleStreamGzipFlashFile("/keys.htm",keyshtm,sizeof(keyshtm),request);
   } else {
-    if (LittleFS.exists("/index_d.htm")) handleStreamFile("/index_d.htm",request); else handleStreamGzipFlashFile("/index.htm",indexhtm,sizeof(indexhtm),request);
+    if (LittleFS.exists("/index_d.htm")) handleStreamFile("/index_d.htm",request,LittleFS,true); else handleStreamGzipFlashFile("/index.htm",indexhtm,sizeof(indexhtm),request);
   }
 }
 
@@ -2328,9 +2426,28 @@ void handleControl(AsyncWebServerRequest *request) {
   if (request->hasParam("clock")) {
     if (request->getParam("clock")->value() == "1") useNSEclockForSleep=true; else useNSEclockForSleep=false;
   }
+  if (request->hasParam("mute")) {
+    if (audioInitialised && enableAudioAnnouncements) {
+      if (request->getParam("mute")->value() == "1") {
+        if (!audioMuted) {
+          xQueueReset(audioQueue);
+          addAudioToQueue(audioVoice,"AN/AF",false);
+        }
+        audioMuted = true;
+      } else {
+        if (audioMuted) {
+          addAudioToQueue(audioVoice,"AN/AO",false);
+        }
+        audioMuted = false;
+      }
+    }
+  }
+
   resp += (isSleeping || forcedSleep) ? "true":"false";
   resp += ",\"display\":";
   resp += (useNSEclockForSleep || (!isSleeping && !forcedSleep)) ? "true":"false";
+  resp += ",\"mute\":";
+  resp += (audioMuted ? "true":"false");
   resp += "}";
   request->send(200, contentTypeJson, resp);
 }
@@ -3259,31 +3376,36 @@ void drawStationBoard() {
           if (line2[numMessages][0]) numMessages++;
         }
         if (station->service[0].trainLength) {
-          int p=0;
-          line2[numMessages][p++] = '\xD7'; // Start of train
-          if (station->coach[0].number[0]) {
-            // Detailed formation data available
-            for (int i=0;i<station->service[0].trainLength;++i) {
-              line2[numMessages][p++] = '\xC7';
-              for (int j=0;j<strlen(station->coach[i].number);++j) line2[numMessages][p++] = toupper(station->coach[i].number[j]) + 152;
-              if (station->coach[i].data & 1) line2[numMessages][p++] = '\xD4'; // "1st"
-              if (station->coach[i].data & 8) line2[numMessages][p++] = '\xD3'; // Wheelchair icon
-              else if (station->coach[i].data & 4) line2[numMessages][p++] = '\xD5'; // Toilet icon
-              line2[numMessages][p++] = '\xC7';
-              if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
+          if (showFormation) {
+            int p=0;
+            line2[numMessages][p++] = '\xD7'; // Start of train
+            if (station->coach[0].number[0]) {
+              // Detailed formation data available
+              for (int i=0;i<station->service[0].trainLength;++i) {
+                line2[numMessages][p++] = '\xC7';
+                for (int j=0;j<strlen(station->coach[i].number);++j) line2[numMessages][p++] = toupper(station->coach[i].number[j]) + 152;
+                if (station->coach[i].data & 1) line2[numMessages][p++] = '\xD4'; // "1st"
+                if (station->coach[i].data & 8) line2[numMessages][p++] = '\xD3'; // Wheelchair icon
+                else if (station->coach[i].data & 4) line2[numMessages][p++] = '\xD5'; // Toilet icon
+                line2[numMessages][p++] = '\xC7';
+                if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
+              }
+            } else {
+              // Add the number of carriages
+              for (int i=0;i<station->service[0].trainLength;++i) {
+                line2[numMessages][p++] = '\xC7';
+                line2[numMessages][p++] = '\xC7';
+                line2[numMessages][p++] = '\xC7';
+                if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
+              }
             }
+            line2[numMessages][p++] = '\xD8';
+            line2[numMessages][p] = '\0';
+            numMessages++;
           } else {
-            // Add the number of carriages
-            for (int i=0;i<station->service[0].trainLength;++i) {
-              line2[numMessages][p++] = '\xC7';
-              line2[numMessages][p++] = '\xC7';
-              line2[numMessages][p++] = '\xC7';
-              if (i < station->service[0].trainLength-1) line2[numMessages][p++] = '\xD2';
-            }
+            sprintf(line2[numMessages],"This train is formed of %d coaches.",station->service[0].trainLength);
+            numMessages++;
           }
-          line2[numMessages][p++] = '\xD8';
-          line2[numMessages][p] = '\0';
-          numMessages++;
         }
       }
 
@@ -3779,6 +3901,8 @@ bool playPrimaryService(const char *announcer, bool checkPath = true) {
       }
     }
   }
+
+  if (!checkPath) lastAnnouncement = millis();
   return result;
 }
 
@@ -3822,6 +3946,7 @@ bool playTubeService(const char *announcer, int svcIndex, int announcementNumber
     }
   }
 
+  if (!checkPath) lastAnnouncement = millis();
   return result;
 }
 
@@ -3874,10 +3999,6 @@ void departureBoardLoop() {
         // Retrieve the updated data
         updateRailDepartures();
         drawStationBoard();
-        if (audioInitialised && enableAudioAnnouncements && station->numServices && strcmp(station->service[0].serviceId,currentServiceId)) {
-          strlcpy(currentServiceId,station->service[0].serviceId,sizeof(currentServiceId));
-          if (playPrimaryService(audioVoice,true)) playPrimaryService(audioVoice,false);
-        }
       } else if (lastUpdateResult == UPD_NO_CHANGE) {
         lastDataLoadTime = millis();
         noDataLoaded = false;
@@ -3896,6 +4017,11 @@ void departureBoardLoop() {
         dataLoadFailureTotal++;
       }
     }
+  }
+
+  if (audioInitialised && enableAudioAnnouncements && station->numServices && strcmp(station->service[0].serviceId,currentServiceId) && (millis()-lastAnnouncement >= limitTalk || !lastAnnouncement)) {
+    strlcpy(currentServiceId,station->service[0].serviceId,sizeof(currentServiceId));
+    if (playPrimaryService(audioVoice,true)) playPrimaryService(audioVoice,false);
   }
 
   if (millis()>timer && numMessages && !isScrollingStops && !isSleeping && lastUpdateResult!=UPD_UNAUTHORISED && !noScrolling && !noDataLoaded) {
@@ -4020,7 +4146,7 @@ int findServiceInAudioHistory(const char* svcId) {
 
 void checkTubeAudioAnnouncement() {
 
-  if (!audioInitialised || !enableAudioAnnouncements || !station->numServices) return;
+  if (!audioInitialised || !enableAudioAnnouncements || !station->numServices || (millis()-lastAnnouncement < limitTalk && lastAnnouncement)) return;
 
   // Check all the services, stop after three announcements on this pass
   int announcements = 0;
@@ -4643,6 +4769,7 @@ void setup() {
   server.on("/updsp", HTTP_GET, [](AsyncWebServerRequest *request){handleUpdateSpeechPacks(request);});
   server.on("/getthemes", HTTP_GET, [](AsyncWebServerRequest *request){handleGetThemes(request);});
   server.on("/loadtheme", HTTP_GET, [](AsyncWebServerRequest *request){handleLoadTheme(request);});
+  server.on("/screen.bmp", HTTP_GET, [](AsyncWebServerRequest *request) { streamCanvasBMP(main_canvas, request); });
 
   //
   // Save settings returned by the Web GUI
